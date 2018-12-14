@@ -319,6 +319,10 @@ Error WasmObjectFile::parseDylinkSection(ReadContext &Ctx) {
   DylinkInfo.MemoryAlignment = readVaruint32(Ctx);
   DylinkInfo.TableSize = readVaruint32(Ctx);
   DylinkInfo.TableAlignment = readVaruint32(Ctx);
+  uint32_t Count = readVaruint32(Ctx);
+  while (Count--) {
+    DylinkInfo.Needed.push_back(readString(Ctx));
+  }
   if (Ctx.Ptr != Ctx.End)
     return make_error<GenericBinaryError>("dylink section ended prematurely",
                                           object_error::parse_failed);
@@ -468,7 +472,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
 
   while (Count--) {
     wasm::WasmSymbolInfo Info;
-    const wasm::WasmSignature *FunctionType = nullptr;
+    const wasm::WasmSignature *Signature = nullptr;
     const wasm::WasmGlobalType *GlobalType = nullptr;
     const wasm::WasmEventType *EventType = nullptr;
 
@@ -486,13 +490,13 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
       if (IsDefined) {
         Info.Name = readString(Ctx);
         unsigned FuncIndex = Info.ElementIndex - NumImportedFunctions;
-        FunctionType = &Signatures[FunctionTypes[FuncIndex]];
+        Signature = &Signatures[FunctionTypes[FuncIndex]];
         wasm::WasmFunction &Function = Functions[FuncIndex];
         if (Function.SymbolName.empty())
           Function.SymbolName = Info.Name;
       } else {
         wasm::WasmImport &Import = *ImportedFunctions[Info.ElementIndex];
-        FunctionType = &Signatures[Import.SigIndex];
+        Signature = &Signatures[Import.SigIndex];
         Info.Name = Import.Field;
         Info.Module = Import.Module;
       }
@@ -565,6 +569,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
         Info.Name = readString(Ctx);
         unsigned EventIndex = Info.ElementIndex - NumImportedEvents;
         wasm::WasmEvent &Event = Events[EventIndex];
+        Signature = &Signatures[Event.Type.SigIndex];
         EventType = &Event.Type;
         if (Event.SymbolName.empty())
           Event.SymbolName = Info.Name;
@@ -572,6 +577,7 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
       } else {
         wasm::WasmImport &Import = *ImportedEvents[Info.ElementIndex];
         EventType = &Import.Event;
+        Signature = &Signatures[EventType->SigIndex];
         Info.Name = Import.Field;
       }
       break;
@@ -589,8 +595,8 @@ Error WasmObjectFile::parseLinkingSectionSymtab(ReadContext &Ctx) {
                                                 Twine(Info.Name),
                                             object_error::parse_failed);
     LinkingData.SymbolTable.emplace_back(Info);
-    Symbols.emplace_back(LinkingData.SymbolTable.back(), FunctionType,
-                         GlobalType, EventType);
+    Symbols.emplace_back(LinkingData.SymbolTable.back(), GlobalType, EventType,
+                         Signature);
     LLVM_DEBUG(dbgs() << "Adding symbol: " << Symbols.back() << "\n");
   }
 
@@ -1402,6 +1408,8 @@ SubtargetFeatures WasmObjectFile::getFeatures() const {
 }
 
 bool WasmObjectFile::isRelocatableObject() const { return HasLinkingSection; }
+
+bool WasmObjectFile::isSharedObject() const { return HasDylinkSection; }
 
 const WasmSection &WasmObjectFile::getWasmSection(DataRefImpl Ref) const {
   assert(Ref.d.a < Sections.size());

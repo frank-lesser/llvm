@@ -2460,10 +2460,6 @@ CodeViewDebug::getTypeIndexForThisPtr(DITypeRef TypeRef,
   // so that the TypeIndex for the this pointer can be shared with the type
   // index for other pointers to this class type.  If there is a ref qualifier
   // then we lookup the pointer using the subroutine as the parent type.
-  const DIType *ParentTy = nullptr;
-  if (Options != PointerOptions::None)
-    ParentTy = SubroutineTy;
-
   auto I = TypeIndices.find({Ty, SubroutineTy});
   if (I != TypeIndices.end())
     return I->second;
@@ -2489,6 +2485,14 @@ TypeIndex CodeViewDebug::getCompleteTypeIndex(DITypeRef TypeRef) {
   // The null DIType is the void type. Don't try to hash it.
   if (!Ty)
     return TypeIndex::Void();
+
+  // Look through typedefs when getting the complete type index. Call
+  // getTypeIndex on the typdef to ensure that any UDTs are accumulated and are
+  // emitted only once.
+  if (Ty->getTag() == dwarf::DW_TAG_typedef)
+    (void)getTypeIndex(Ty);
+  while (Ty->getTag() == dwarf::DW_TAG_typedef)
+    Ty = cast<DIDerivedType>(Ty)->getBaseType().resolve();
 
   // If this is a non-record type, the complete type index is the same as the
   // normal type index. Just call getTypeIndex.
