@@ -1,9 +1,8 @@
 //===-- UnrollLoop.cpp - Loop unrolling utilities -------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -54,10 +53,10 @@ UnrollRuntimeEpilog("unroll-runtime-epilog", cl::init(false), cl::Hidden,
 static cl::opt<bool>
 UnrollVerifyDomtree("unroll-verify-domtree", cl::Hidden,
                     cl::desc("Verify domtree after unrolling"),
-#ifdef NDEBUG
-    cl::init(false)
-#else
+#ifdef EXPENSIVE_CHECKS
     cl::init(true)
+#else
+    cl::init(false)
 #endif
                     );
 
@@ -598,8 +597,15 @@ LoopUnrollResult llvm::UnrollLoop(
     for (BasicBlock *BB : L->getBlocks())
       for (Instruction &I : *BB)
         if (!isa<DbgInfoIntrinsic>(&I))
-          if (const DILocation *DIL = I.getDebugLoc())
-            I.setDebugLoc(DIL->cloneWithDuplicationFactor(Count));
+          if (const DILocation *DIL = I.getDebugLoc()) {
+            auto NewDIL = DIL->cloneByMultiplyingDuplicationFactor(Count);
+            if (NewDIL)
+              I.setDebugLoc(NewDIL.getValue());
+            else
+              LLVM_DEBUG(dbgs()
+                         << "Failed to create new discriminator: "
+                         << DIL->getFilename() << " Line: " << DIL->getLine());
+          }
 
   for (unsigned It = 1; It != Count; ++It) {
     std::vector<BasicBlock*> NewBlocks;

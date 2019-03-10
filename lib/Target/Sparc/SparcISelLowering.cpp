@@ -1,9 +1,8 @@
 //===-- SparcISelLowering.cpp - Sparc DAG Lowering Implementation ---------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -1866,8 +1865,8 @@ void SparcTargetLowering::computeKnownBitsForTargetNode
   case SPISD::SELECT_ICC:
   case SPISD::SELECT_XCC:
   case SPISD::SELECT_FCC:
-    DAG.computeKnownBits(Op.getOperand(1), Known, Depth+1);
-    DAG.computeKnownBits(Op.getOperand(0), Known2, Depth+1);
+    Known = DAG.computeKnownBits(Op.getOperand(1), Depth + 1);
+    Known2 = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
 
     // Only known if known in both the LHS and RHS.
     Known.One &= Known2.One;

@@ -1,9 +1,8 @@
 //===- ELFObjectFile.h - ELF object file implementation ---------*- C++ -*-===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -41,6 +40,9 @@
 
 namespace llvm {
 namespace object {
+
+constexpr int NumElfSymbolTypes = 8;
+extern const llvm::EnumEntry<unsigned> ElfSymbolTypes[NumElfSymbolTypes];
 
 class elf_symbol_iterator;
 
@@ -148,6 +150,16 @@ public:
 
   uint8_t getELFType() const {
     return getObject()->getSymbolELFType(getRawDataRefImpl());
+  }
+
+  StringRef getELFTypeName() const {
+    uint8_t Type = getELFType();
+    for (auto &EE : ElfSymbolTypes) {
+      if (EE.Value == Type) {
+        return EE.AltName;
+      }
+    }
+    return "";
   }
 };
 
@@ -441,7 +453,16 @@ Expected<StringRef> ELFObjectFile<ELFT>::getSymbolName(DataRefImpl Sym) const {
   auto SymStrTabOrErr = EF.getStringTable(StringTableSec);
   if (!SymStrTabOrErr)
     return SymStrTabOrErr.takeError();
-  return ESym->getName(*SymStrTabOrErr);
+  Expected<StringRef> Name = ESym->getName(*SymStrTabOrErr);
+
+  // If the symbol name is empty use the section name.
+  if ((!Name || Name->empty()) && ESym->getType() == ELF::STT_SECTION) {
+    StringRef SecName;
+    Expected<section_iterator> Sec = getSymbolSection(Sym);
+    if (Sec && !(*Sec)->getName(SecName))
+      return SecName;
+  }
+  return Name;
 }
 
 template <class ELFT>

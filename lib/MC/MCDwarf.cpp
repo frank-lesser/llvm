@@ -1,9 +1,8 @@
 //===- lib/MC/MCDwarf.cpp - MCDwarf implementation ------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -431,10 +430,14 @@ void MCDwarfLineTableHeader::emitV5FileDirTables(
                                       : dwarf::DW_FORM_string);
   }
   // Then the counted list of files. The root file is file #0, then emit the
-  // files as provide by .file directives.  To accommodate assembler source
-  // written for DWARF v4 but trying to emit v5, if we didn't see a root file
-  // explicitly, replicate file #1.
-  MCOS->EmitULEB128IntValue(MCDwarfFiles.size());
+  // files as provide by .file directives.
+  // MCDwarfFiles has an unused element [0] so use size() not size()+1.
+  // But sometimes MCDwarfFiles is empty, in which case we still emit one file.
+  MCOS->EmitULEB128IntValue(MCDwarfFiles.empty() ? 1 : MCDwarfFiles.size());
+  // To accommodate assembler source written for DWARF v4 but trying to emit
+  // v5: If we didn't see a root file explicitly, replicate file #1.
+  assert((!RootFile.Name.empty() || MCDwarfFiles.size() >= 1) &&
+         "No root file and no .file directives");
   emitOneV5FileEntry(MCOS, RootFile.Name.empty() ? MCDwarfFiles[1] : RootFile,
                      HasAllMD5, HasSource, LineStr);
   for (unsigned i = 1; i < MCDwarfFiles.size(); ++i)
@@ -1007,9 +1010,15 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
     MCOS->EmitBytes(MCDwarfDirs[0]);
     MCOS->EmitBytes(sys::path::get_separator());
   }
-  const SmallVectorImpl<MCDwarfFile> &MCDwarfFiles =
-    MCOS->getContext().getMCDwarfFiles();
-  MCOS->EmitBytes(MCDwarfFiles[1].Name);
+  const SmallVectorImpl<MCDwarfFile> &MCDwarfFiles = context.getMCDwarfFiles();
+  // MCDwarfFiles might be empty if we have an empty source file.
+  // If it's not empty, [0] is unused and [1] is the first actual file.
+  assert(MCDwarfFiles.empty() || MCDwarfFiles.size() >= 2);
+  const MCDwarfFile &RootFile =
+      MCDwarfFiles.empty()
+          ? context.getMCDwarfLineTable(/*CUID=*/0).getRootFile()
+          : MCDwarfFiles[1];
+  MCOS->EmitBytes(RootFile.Name);
   MCOS->EmitIntValue(0, 1); // NULL byte to terminate the string.
 
   // AT_comp_dir, the working directory the assembly was done in.
@@ -1565,9 +1574,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
   uint8_t CIEVersion = getCIEVersion(IsEH, context.getDwarfVersion());
   Streamer.EmitIntValue(CIEVersion, 1);
 
-  // Augmentation String
-  SmallString<8> Augmentation;
   if (IsEH) {
+    SmallString<8> Augmentation;
     Augmentation += "z";
     if (Frame.Personality)
       Augmentation += "P";
@@ -1576,6 +1584,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
     Augmentation += "R";
     if (Frame.IsSignalFrame)
       Augmentation += "S";
+    if (Frame.IsBKeyFrame)
+      Augmentation += "B";
     Streamer.EmitBytes(Augmentation);
   }
   Streamer.EmitIntValue(0, 1);
@@ -1730,25 +1740,28 @@ namespace {
 
 struct CIEKey {
   static const CIEKey getEmptyKey() {
-    return CIEKey(nullptr, 0, -1, false, false, static_cast<unsigned>(INT_MAX));
+    return CIEKey(nullptr, 0, -1, false, false, static_cast<unsigned>(INT_MAX),
+                  false);
   }
 
   static const CIEKey getTombstoneKey() {
-    return CIEKey(nullptr, -1, 0, false, false, static_cast<unsigned>(INT_MAX));
+    return CIEKey(nullptr, -1, 0, false, false, static_cast<unsigned>(INT_MAX),
+                  false);
   }
 
   CIEKey(const MCSymbol *Personality, unsigned PersonalityEncoding,
          unsigned LSDAEncoding, bool IsSignalFrame, bool IsSimple,
-         unsigned RAReg)
+         unsigned RAReg, bool IsBKeyFrame)
       : Personality(Personality), PersonalityEncoding(PersonalityEncoding),
         LsdaEncoding(LSDAEncoding), IsSignalFrame(IsSignalFrame),
-        IsSimple(IsSimple), RAReg(RAReg) {}
+        IsSimple(IsSimple), RAReg(RAReg), IsBKeyFrame(IsBKeyFrame) {}
 
   explicit CIEKey(const MCDwarfFrameInfo &Frame)
       : Personality(Frame.Personality),
         PersonalityEncoding(Frame.PersonalityEncoding),
         LsdaEncoding(Frame.LsdaEncoding), IsSignalFrame(Frame.IsSignalFrame),
-        IsSimple(Frame.IsSimple), RAReg(Frame.RAReg) {}
+        IsSimple(Frame.IsSimple), RAReg(Frame.RAReg),
+        IsBKeyFrame(Frame.IsBKeyFrame) {}
 
   const MCSymbol *Personality;
   unsigned PersonalityEncoding;
@@ -1756,6 +1769,7 @@ struct CIEKey {
   bool IsSignalFrame;
   bool IsSimple;
   unsigned RAReg;
+  bool IsBKeyFrame;
 };
 
 } // end anonymous namespace
@@ -1767,9 +1781,9 @@ template <> struct DenseMapInfo<CIEKey> {
   static CIEKey getTombstoneKey() { return CIEKey::getTombstoneKey(); }
 
   static unsigned getHashValue(const CIEKey &Key) {
-    return static_cast<unsigned>(
-        hash_combine(Key.Personality, Key.PersonalityEncoding, Key.LsdaEncoding,
-                     Key.IsSignalFrame, Key.IsSimple, Key.RAReg));
+    return static_cast<unsigned>(hash_combine(
+        Key.Personality, Key.PersonalityEncoding, Key.LsdaEncoding,
+        Key.IsSignalFrame, Key.IsSimple, Key.RAReg, Key.IsBKeyFrame));
   }
 
   static bool isEqual(const CIEKey &LHS, const CIEKey &RHS) {
@@ -1777,8 +1791,8 @@ template <> struct DenseMapInfo<CIEKey> {
            LHS.PersonalityEncoding == RHS.PersonalityEncoding &&
            LHS.LsdaEncoding == RHS.LsdaEncoding &&
            LHS.IsSignalFrame == RHS.IsSignalFrame &&
-           LHS.IsSimple == RHS.IsSimple &&
-           LHS.RAReg == RHS.RAReg;
+           LHS.IsSimple == RHS.IsSimple && LHS.RAReg == RHS.RAReg &&
+           LHS.IsBKeyFrame == RHS.IsBKeyFrame;
   }
 };
 

@@ -1,9 +1,8 @@
 //===-- PPCISelDAGToDAG.cpp - PPC --pattern matching inst selector --------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -688,9 +687,8 @@ bool PPCDAGToDAGISel::tryBitfieldInsert(SDNode *N) {
   SDValue Op1 = N->getOperand(1);
   SDLoc dl(N);
 
-  KnownBits LKnown, RKnown;
-  CurDAG->computeKnownBits(Op0, LKnown);
-  CurDAG->computeKnownBits(Op1, RKnown);
+  KnownBits LKnown = CurDAG->computeKnownBits(Op0);
+  KnownBits RKnown = CurDAG->computeKnownBits(Op1);
 
   unsigned TargetMask = LKnown.Zero.getZExtValue();
   unsigned InsertMask = RKnown.Zero.getZExtValue();
@@ -734,8 +732,7 @@ bool PPCDAGToDAGISel::tryBitfieldInsert(SDNode *N) {
        // The AND mask might not be a constant, and we need to make sure that
        // if we're going to fold the masking with the insert, all bits not
        // know to be zero in the mask are known to be one.
-        KnownBits MKnown;
-        CurDAG->computeKnownBits(Op1.getOperand(1), MKnown);
+        KnownBits MKnown = CurDAG->computeKnownBits(Op1.getOperand(1));
         bool CanFoldMask = InsertMask == MKnown.One.getZExtValue();
 
         unsigned SHOpc = Op1.getOperand(0).getOpcode();
@@ -1333,6 +1330,34 @@ class BitPermutationSelector {
 
       return std::make_pair(Interesting, &Bits);
     }
+    case ISD::TRUNCATE: {
+      EVT FromType = V.getOperand(0).getValueType();
+      EVT ToType = V.getValueType();
+      // We support only the case with truncate from i64 to i32.
+      if (FromType != MVT::i64 || ToType != MVT::i32)
+        break;
+      const unsigned NumAllBits = FromType.getSizeInBits();
+      SmallVector<ValueBit, 64> *InBits;
+      std::tie(Interesting, InBits) = getValueBits(V.getOperand(0),
+                                                    NumAllBits);
+      const unsigned NumValidBits = ToType.getSizeInBits();
+
+      // A 32-bit instruction cannot touch upper 32-bit part of 64-bit value.
+      // So, we cannot include this truncate.
+      bool UseUpper32bit = false;
+      for (unsigned i = 0; i < NumValidBits; ++i)
+        if ((*InBits)[i].hasValue() && (*InBits)[i].getValueBitIndex() >= 32) {
+          UseUpper32bit = true;
+          break;
+        }
+      if (UseUpper32bit)
+        break;
+
+      for (unsigned i = 0; i < NumValidBits; ++i)
+        Bits[i] = (*InBits)[i];
+
+      return std::make_pair(Interesting, &Bits);
+    }
     case ISD::AssertZext: {
       // For AssertZext, we look through the operand and
       // mark the bits known to be zero.
@@ -1678,6 +1703,17 @@ class BitPermutationSelector {
     return ExtVal;
   }
 
+  SDValue TruncateToInt32(SDValue V, const SDLoc &dl) {
+    if (V.getValueSizeInBits() == 32)
+      return V;
+
+    assert(V.getValueSizeInBits() == 64);
+    SDValue SubRegIdx = CurDAG->getTargetConstant(PPC::sub_32, dl, MVT::i32);
+    SDValue SubVal = SDValue(CurDAG->getMachineNode(PPC::EXTRACT_SUBREG, dl,
+                                                    MVT::i32, V, SubRegIdx), 0);
+    return SubVal;
+  }
+
   // Depending on the number of groups for a particular value, it might be
   // better to rotate, mask explicitly (using andi/andis), and then or the
   // result. Select this part of the result first.
@@ -1736,12 +1772,12 @@ class BitPermutationSelector {
       SDValue VRot;
       if (VRI.RLAmt) {
         SDValue Ops[] =
-          { VRI.V, getI32Imm(VRI.RLAmt, dl), getI32Imm(0, dl),
-            getI32Imm(31, dl) };
+          { TruncateToInt32(VRI.V, dl), getI32Imm(VRI.RLAmt, dl),
+            getI32Imm(0, dl), getI32Imm(31, dl) };
         VRot = SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32,
                                               Ops), 0);
       } else {
-        VRot = VRI.V;
+        VRot = TruncateToInt32(VRI.V, dl);
       }
 
       SDValue ANDIVal, ANDISVal;
@@ -1793,12 +1829,12 @@ class BitPermutationSelector {
       if (VRI.RLAmt) {
         if (InstCnt) *InstCnt += 1;
         SDValue Ops[] =
-          { VRI.V, getI32Imm(VRI.RLAmt, dl), getI32Imm(0, dl),
-            getI32Imm(31, dl) };
+          { TruncateToInt32(VRI.V, dl), getI32Imm(VRI.RLAmt, dl),
+            getI32Imm(0, dl), getI32Imm(31, dl) };
         Res = SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops),
                       0);
       } else {
-        Res = VRI.V;
+        Res = TruncateToInt32(VRI.V, dl);
       }
 
       // Now, remove all groups with this underlying value and rotation factor.
@@ -1813,13 +1849,13 @@ class BitPermutationSelector {
     for (auto &BG : BitGroups) {
       if (!Res) {
         SDValue Ops[] =
-          { BG.V, getI32Imm(BG.RLAmt, dl),
+          { TruncateToInt32(BG.V, dl), getI32Imm(BG.RLAmt, dl),
             getI32Imm(Bits.size() - BG.EndIdx - 1, dl),
             getI32Imm(Bits.size() - BG.StartIdx - 1, dl) };
         Res = SDValue(CurDAG->getMachineNode(PPC::RLWINM, dl, MVT::i32, Ops), 0);
       } else {
         SDValue Ops[] =
-          { Res, BG.V, getI32Imm(BG.RLAmt, dl),
+          { Res, TruncateToInt32(BG.V, dl), getI32Imm(BG.RLAmt, dl),
               getI32Imm(Bits.size() - BG.EndIdx - 1, dl),
             getI32Imm(Bits.size() - BG.StartIdx - 1, dl) };
         Res = SDValue(CurDAG->getMachineNode(PPC::RLWIMI, dl, MVT::i32, Ops), 0);
@@ -4317,13 +4353,25 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     if (trySETCC(N))
       return;
     break;
-
+  // These nodes will be transformed into GETtlsADDR32 node, which
+  // later becomes BL_TLS __tls_get_addr(sym at tlsgd)@PLT
+  case PPCISD::ADDI_TLSLD_L_ADDR:
+  case PPCISD::ADDI_TLSGD_L_ADDR: {
+    const Module *Mod = MF->getFunction().getParent();
+    if (PPCLowering->getPointerTy(CurDAG->getDataLayout()) != MVT::i32 ||
+        !PPCSubTarget->isSecurePlt() || !PPCSubTarget->isTargetELF() ||
+        Mod->getPICLevel() == PICLevel::SmallPIC)
+      break;
+    // Attach global base pointer on GETtlsADDR32 node in order to
+    // generate secure plt code for TLS symbols.
+    getGlobalBaseReg();
+  } break;
   case PPCISD::CALL: {
     const Module *M = MF->getFunction().getParent();
 
     if (PPCLowering->getPointerTy(CurDAG->getDataLayout()) != MVT::i32 ||
-        !PPCSubTarget->isSecurePlt() || !PPCSubTarget->isTargetELF() ||
-        M->getPICLevel() == PICLevel::SmallPIC)
+        (!TM.isPositionIndependent() || !PPCSubTarget->isSecurePlt()) ||
+        !PPCSubTarget->isTargetELF() || M->getPICLevel() == PICLevel::SmallPIC)
       break;
 
     SDValue Op = N->getOperand(1);
@@ -4613,8 +4661,7 @@ void PPCDAGToDAGISel::Select(SDNode *N) {
     int16_t Imm;
     if (N->getOperand(0)->getOpcode() == ISD::FrameIndex &&
         isIntS16Immediate(N->getOperand(1), Imm)) {
-      KnownBits LHSKnown;
-      CurDAG->computeKnownBits(N->getOperand(0), LHSKnown);
+      KnownBits LHSKnown = CurDAG->computeKnownBits(N->getOperand(0));
 
       // If this is equivalent to an add, then we can fold it with the
       // FrameIndex calculation.

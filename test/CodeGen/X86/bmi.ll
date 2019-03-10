@@ -157,15 +157,15 @@ define i1 @and_cmp_const(i32 %x) {
 ; X86-LABEL: and_cmp_const:
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    notl %eax
 ; X86-NEXT:    andl $43, %eax
+; X86-NEXT:    cmpl $43, %eax
 ; X86-NEXT:    sete %al
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: and_cmp_const:
 ; X64:       # %bb.0:
-; X64-NEXT:    notl %edi
 ; X64-NEXT:    andl $43, %edi
+; X64-NEXT:    cmpl $43, %edi
 ; X64-NEXT:    sete %al
 ; X64-NEXT:    retq
   %and = and i32 %x, 43
@@ -691,9 +691,7 @@ define i32 @blsmsk32_z(i32 %a, i32 %b) nounwind {
 define i32 @blsmsk32_z2(i32 %a, i32 %b, i32 %c) nounwind {
 ; X86-LABEL: blsmsk32_z2:
 ; X86:       # %bb.0:
-; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    leal -1(%eax), %ecx
-; X86-NEXT:    xorl %eax, %ecx
+; X86-NEXT:    blsmskl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    leal {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    leal {{[0-9]+}}(%esp), %ecx
 ; X86-NEXT:    cmovel %eax, %ecx
@@ -703,9 +701,7 @@ define i32 @blsmsk32_z2(i32 %a, i32 %b, i32 %c) nounwind {
 ; X64-LABEL: blsmsk32_z2:
 ; X64:       # %bb.0:
 ; X64-NEXT:    movl %esi, %eax
-; X64-NEXT:    # kill: def $edi killed $edi def $rdi
-; X64-NEXT:    leal -1(%rdi), %ecx
-; X64-NEXT:    xorl %edi, %ecx
+; X64-NEXT:    blsmskl %edi, %ecx
 ; X64-NEXT:    cmovnel %edx, %eax
 ; X64-NEXT:    retq
   %t0 = sub i32 %a, 1
@@ -800,8 +796,7 @@ define i64 @blsmsk64_z2(i64 %a, i64 %b, i64 %c) nounwind {
 ; X64-LABEL: blsmsk64_z2:
 ; X64:       # %bb.0:
 ; X64-NEXT:    movq %rsi, %rax
-; X64-NEXT:    leaq -1(%rdi), %rcx
-; X64-NEXT:    xorq %rdi, %rcx
+; X64-NEXT:    blsmskq %rdi, %rcx
 ; X64-NEXT:    cmovneq %rdx, %rax
 ; X64-NEXT:    retq
   %t0 = sub i64 %a, 1
@@ -1032,6 +1027,7 @@ define void @pr40060(i32, i32) {
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    bextrl %eax, {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    testl %eax, %eax
 ; X86-NEXT:    js .LBB45_1
 ; X86-NEXT:  # %bb.2:
 ; X86-NEXT:    jmp bar # TAILCALL
@@ -1041,6 +1037,7 @@ define void @pr40060(i32, i32) {
 ; X64-LABEL: pr40060:
 ; X64:       # %bb.0:
 ; X64-NEXT:    bextrl %esi, %edi, %eax
+; X64-NEXT:    testl %eax, %eax
 ; X64-NEXT:    js .LBB45_1
 ; X64-NEXT:  # %bb.2:
 ; X64-NEXT:    jmp bar # TAILCALL
@@ -1054,6 +1051,101 @@ define void @pr40060(i32, i32) {
   br label %6
 
   ret void
+}
+
+define i32 @blsr32_branch(i32 %x) {
+; X86-LABEL: blsr32_branch:
+; X86:       # %bb.0:
+; X86-NEXT:    pushl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 8
+; X86-NEXT:    .cfi_offset %esi, -8
+; X86-NEXT:    blsrl {{[0-9]+}}(%esp), %esi
+; X86-NEXT:    jne .LBB46_2
+; X86-NEXT:  # %bb.1:
+; X86-NEXT:    calll bar
+; X86-NEXT:  .LBB46_2:
+; X86-NEXT:    movl %esi, %eax
+; X86-NEXT:    popl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 4
+; X86-NEXT:    retl
+;
+; X64-LABEL: blsr32_branch:
+; X64:       # %bb.0:
+; X64-NEXT:    pushq %rbx
+; X64-NEXT:    .cfi_def_cfa_offset 16
+; X64-NEXT:    .cfi_offset %rbx, -16
+; X64-NEXT:    blsrl %edi, %ebx
+; X64-NEXT:    jne .LBB46_2
+; X64-NEXT:  # %bb.1:
+; X64-NEXT:    callq bar
+; X64-NEXT:  .LBB46_2:
+; X64-NEXT:    movl %ebx, %eax
+; X64-NEXT:    popq %rbx
+; X64-NEXT:    .cfi_def_cfa_offset 8
+; X64-NEXT:    retq
+  %tmp = sub i32 %x, 1
+  %tmp2 = and i32 %x, %tmp
+  %cmp = icmp eq i32 %tmp2, 0
+  br i1 %cmp, label %1, label %2
+
+  tail call void @bar()
+  br label %2
+  ret i32 %tmp2
+}
+
+define i64 @blsr64_branch(i64 %x) {
+; X86-LABEL: blsr64_branch:
+; X86:       # %bb.0:
+; X86-NEXT:    pushl %edi
+; X86-NEXT:    .cfi_def_cfa_offset 8
+; X86-NEXT:    pushl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 12
+; X86-NEXT:    .cfi_offset %esi, -12
+; X86-NEXT:    .cfi_offset %edi, -8
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; X86-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; X86-NEXT:    movl %eax, %esi
+; X86-NEXT:    addl $-1, %esi
+; X86-NEXT:    movl %ecx, %edi
+; X86-NEXT:    adcl $-1, %edi
+; X86-NEXT:    andl %eax, %esi
+; X86-NEXT:    andl %ecx, %edi
+; X86-NEXT:    movl %esi, %eax
+; X86-NEXT:    orl %edi, %eax
+; X86-NEXT:    jne .LBB47_2
+; X86-NEXT:  # %bb.1:
+; X86-NEXT:    calll bar
+; X86-NEXT:  .LBB47_2:
+; X86-NEXT:    movl %esi, %eax
+; X86-NEXT:    movl %edi, %edx
+; X86-NEXT:    popl %esi
+; X86-NEXT:    .cfi_def_cfa_offset 8
+; X86-NEXT:    popl %edi
+; X86-NEXT:    .cfi_def_cfa_offset 4
+; X86-NEXT:    retl
+;
+; X64-LABEL: blsr64_branch:
+; X64:       # %bb.0:
+; X64-NEXT:    pushq %rbx
+; X64-NEXT:    .cfi_def_cfa_offset 16
+; X64-NEXT:    .cfi_offset %rbx, -16
+; X64-NEXT:    blsrq %rdi, %rbx
+; X64-NEXT:    jne .LBB47_2
+; X64-NEXT:  # %bb.1:
+; X64-NEXT:    callq bar
+; X64-NEXT:  .LBB47_2:
+; X64-NEXT:    movq %rbx, %rax
+; X64-NEXT:    popq %rbx
+; X64-NEXT:    .cfi_def_cfa_offset 8
+; X64-NEXT:    retq
+  %tmp = sub i64 %x, 1
+  %tmp2 = and i64 %x, %tmp
+  %cmp = icmp eq i64 %tmp2, 0
+  br i1 %cmp, label %1, label %2
+
+  tail call void @bar()
+  br label %2
+  ret i64 %tmp2
 }
 
 declare void @bar()

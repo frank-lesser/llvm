@@ -1,5 +1,5 @@
-// RUN: llvm-mc -mattr=+code-object-v3 -triple amdgcn-amd-amdhsa -mcpu=gfx900 -mattr=+xnack < %s | FileCheck --check-prefix=ASM %s
-// RUN: llvm-mc -mattr=+code-object-v3 -triple amdgcn-amd-amdhsa -mcpu=gfx900 -mattr=+xnack -filetype=obj < %s > %t
+// RUN: llvm-mc -mattr=+code-object-v3 -triple amdgcn-amd-amdhsa -mcpu=gfx904 -mattr=+xnack < %s | FileCheck --check-prefix=ASM %s
+// RUN: llvm-mc -mattr=+code-object-v3 -triple amdgcn-amd-amdhsa -mcpu=gfx904 -mattr=+xnack -filetype=obj < %s > %t
 // RUN: llvm-readobj -elf-output-style=GNU -sections -symbols -relocations %t | FileCheck --check-prefix=READOBJ %s
 // RUN: llvm-objdump -s -j .rodata %t | FileCheck --check-prefix=OBJDUMP %s
 
@@ -16,12 +16,12 @@
 // READOBJ: 0000000000000090 {{[0-9a-f]+}}00000005 R_AMDGPU_REL64 0000000000000000 .text + 210
 
 // READOBJ: Symbol table '.symtab' contains {{[0-9]+}} entries:
-// READOBJ: {{[0-9]+}}: 0000000000000100  0 FUNC    LOCAL  DEFAULT 2 complete
-// READOBJ: {{[0-9]+}}: 0000000000000000  0 FUNC    LOCAL  DEFAULT 2 minimal
-// READOBJ: {{[0-9]+}}: 0000000000000200  0 FUNC    LOCAL  DEFAULT 2 special_sgpr
-// READOBJ: {{[0-9]+}}: 0000000000000040 64 OBJECT  GLOBAL DEFAULT 3 complete.kd
-// READOBJ: {{[0-9]+}}: 0000000000000000 64 OBJECT  GLOBAL DEFAULT 3 minimal.kd
-// READOBJ: {{[0-9]+}}: 0000000000000080 64 OBJECT  GLOBAL DEFAULT 3 special_sgpr.kd
+// READOBJ: {{[0-9]+}}: 0000000000000100  0 FUNC    LOCAL  PROTECTED 2 complete
+// READOBJ: {{[0-9]+}}: 0000000000000040 64 OBJECT  LOCAL  DEFAULT   3 complete.kd
+// READOBJ: {{[0-9]+}}: 0000000000000000  0 FUNC    LOCAL  PROTECTED 2 minimal
+// READOBJ: {{[0-9]+}}: 0000000000000000 64 OBJECT  LOCAL  DEFAULT   3 minimal.kd
+// READOBJ: {{[0-9]+}}: 0000000000000200  0 FUNC    LOCAL  PROTECTED 2 special_sgpr
+// READOBJ: {{[0-9]+}}: 0000000000000080 64 OBJECT  LOCAL  DEFAULT   3 special_sgpr.kd
 
 // OBJDUMP: Contents of section .rodata
 // Note, relocation for KERNEL_CODE_ENTRY_BYTE_OFFSET is not resolved here.
@@ -44,8 +44,8 @@
 .text
 // ASM: .text
 
-.amdgcn_target "amdgcn-amd-amdhsa--gfx900+xnack"
-// ASM: .amdgcn_target "amdgcn-amd-amdhsa--gfx900+xnack"
+.amdgcn_target "amdgcn-amd-amdhsa--gfx904+xnack"
+// ASM: .amdgcn_target "amdgcn-amd-amdhsa--gfx904+xnack"
 
 .p2align 8
 .type minimal,@function
@@ -186,6 +186,12 @@ special_sgpr:
 
 .byte .amdgcn.gfx_generation_number
 // ASM: .byte 9
+
+.byte .amdgcn.gfx_generation_minor
+// ASM: .byte 0
+
+.byte .amdgcn.gfx_generation_stepping
+// ASM: .byte 4
 
 .byte .amdgcn.next_free_vgpr
 // ASM: .byte 0
