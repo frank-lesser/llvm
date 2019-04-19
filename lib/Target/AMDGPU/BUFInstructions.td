@@ -821,7 +821,7 @@ defm BUFFER_LOAD_DWORDX2 : MUBUF_Pseudo_Loads <
   "buffer_load_dwordx2", VReg_64, v2i32, mubuf_load
 >;
 defm BUFFER_LOAD_DWORDX3 : MUBUF_Pseudo_Loads <
-  "buffer_load_dwordx3", VReg_96, untyped, mubuf_load
+  "buffer_load_dwordx3", VReg_96, v3i32, mubuf_load
 >;
 defm BUFFER_LOAD_DWORDX4 : MUBUF_Pseudo_Loads <
   "buffer_load_dwordx4", VReg_128, v4i32, mubuf_load
@@ -830,7 +830,7 @@ defm BUFFER_LOAD_DWORDX4 : MUBUF_Pseudo_Loads <
 // This is not described in AMD documentation,
 // but 'lds' versions of these opcodes are available
 // in at least GFX8+ chips. See Bug 37653.
-let SubtargetPredicate = isVI in {
+let SubtargetPredicate = isGFX8GFX9 in {
 defm BUFFER_LOAD_DWORDX2_LDS : MUBUF_Pseudo_Loads <
   "buffer_load_dwordx2", VReg_64, v2i32, null_frag, 0, 1
 >;
@@ -855,7 +855,7 @@ defm BUFFER_STORE_DWORDX2 : MUBUF_Pseudo_Stores <
   "buffer_store_dwordx2", VReg_64, v2i32, store_global
 >;
 defm BUFFER_STORE_DWORDX3 : MUBUF_Pseudo_Stores <
-  "buffer_store_dwordx3", VReg_96, untyped, store_global
+  "buffer_store_dwordx3", VReg_96, v3i32, store_global
 >;
 defm BUFFER_STORE_DWORDX4 : MUBUF_Pseudo_Stores <
   "buffer_store_dwordx4", VReg_128, v4i32, store_global
@@ -939,11 +939,11 @@ defm BUFFER_ATOMIC_DEC_X2 : MUBUF_Pseudo_Atomics <
   "buffer_atomic_dec_x2", VReg_64, i64, atomic_dec_global
 >;
 
-let SubtargetPredicate = isVI in {
+let SubtargetPredicate = isGFX8GFX9 in {
 def BUFFER_STORE_LDS_DWORD : MUBUF_Pseudo_Store_Lds <"buffer_store_lds_dword">;
 }
 
-let SubtargetPredicate = isSI in { // isn't on CI & VI
+let SubtargetPredicate = isGFX6 in { // isn't on CI & VI
 /*
 defm BUFFER_ATOMIC_RSUB        : MUBUF_Pseudo_Atomics <"buffer_atomic_rsub">;
 defm BUFFER_ATOMIC_FCMPSWAP    : MUBUF_Pseudo_Atomics <"buffer_atomic_fcmpswap">;
@@ -1011,11 +1011,11 @@ def BUFFER_WBINVL1 : MUBUF_Invalidate <"buffer_wbinvl1",
 
 defm TBUFFER_LOAD_FORMAT_X     : MTBUF_Pseudo_Loads  <"tbuffer_load_format_x",     VGPR_32>;
 defm TBUFFER_LOAD_FORMAT_XY    : MTBUF_Pseudo_Loads  <"tbuffer_load_format_xy",    VReg_64>;
-defm TBUFFER_LOAD_FORMAT_XYZ   : MTBUF_Pseudo_Loads  <"tbuffer_load_format_xyz",   VReg_128>;
+defm TBUFFER_LOAD_FORMAT_XYZ   : MTBUF_Pseudo_Loads  <"tbuffer_load_format_xyz",   VReg_96>;
 defm TBUFFER_LOAD_FORMAT_XYZW  : MTBUF_Pseudo_Loads  <"tbuffer_load_format_xyzw",  VReg_128>;
 defm TBUFFER_STORE_FORMAT_X    : MTBUF_Pseudo_Stores <"tbuffer_store_format_x",    VGPR_32>;
 defm TBUFFER_STORE_FORMAT_XY   : MTBUF_Pseudo_Stores <"tbuffer_store_format_xy",   VReg_64>;
-defm TBUFFER_STORE_FORMAT_XYZ  : MTBUF_Pseudo_Stores <"tbuffer_store_format_xyz",  VReg_128>;
+defm TBUFFER_STORE_FORMAT_XYZ  : MTBUF_Pseudo_Stores <"tbuffer_store_format_xyz",  VReg_96>;
 defm TBUFFER_STORE_FORMAT_XYZW : MTBUF_Pseudo_Stores <"tbuffer_store_format_xyzw", VReg_128>;
 
 let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
@@ -1040,19 +1040,16 @@ let SubtargetPredicate = HasPackedD16VMem, D16Buf = 1 in {
   defm TBUFFER_STORE_FORMAT_D16_XYZW : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_xyzw", VReg_64>;
 } // End HasPackedD16VMem.
 
-let SubtargetPredicate = isCIVI in {
+let SubtargetPredicate = isGFX7Plus in {
 
 //===----------------------------------------------------------------------===//
 // Instruction definitions for CI and newer.
 //===----------------------------------------------------------------------===//
-// Remaining instructions:
-// BUFFER_LOAD_DWORDX3
-// BUFFER_STORE_DWORDX3
 
 def BUFFER_WBINVL1_VOL : MUBUF_Invalidate <"buffer_wbinvl1_vol",
                                            int_amdgcn_buffer_wbinvl1_vol>;
 
-} // End let SubtargetPredicate = isCIVI
+} // End let SubtargetPredicate = isGFX7Plus
 
 //===----------------------------------------------------------------------===//
 // MUBUF Patterns
@@ -1107,6 +1104,8 @@ defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, f32, "BUFFER_LOAD_FORMAT_X">
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, i32, "BUFFER_LOAD_FORMAT_X">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v2f32, "BUFFER_LOAD_FORMAT_XY">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v2i32, "BUFFER_LOAD_FORMAT_XY">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v3f32, "BUFFER_LOAD_FORMAT_XYZ">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v3i32, "BUFFER_LOAD_FORMAT_XYZ">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v4f32, "BUFFER_LOAD_FORMAT_XYZW">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_format, v4i32, "BUFFER_LOAD_FORMAT_XYZW">;
 
@@ -1130,8 +1129,14 @@ defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, f32, "BUFFER_LOAD_DWORD">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, i32, "BUFFER_LOAD_DWORD">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v2f32, "BUFFER_LOAD_DWORDX2">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v2i32, "BUFFER_LOAD_DWORDX2">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v3f32, "BUFFER_LOAD_DWORDX3">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v3i32, "BUFFER_LOAD_DWORDX3">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v4f32, "BUFFER_LOAD_DWORDX4">;
 defm : MUBUF_LoadIntrinsicPat<SIbuffer_load, v4i32, "BUFFER_LOAD_DWORDX4">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_byte, i32, "BUFFER_LOAD_SBYTE">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_short, i32, "BUFFER_LOAD_SSHORT">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_ubyte, i32, "BUFFER_LOAD_UBYTE">;
+defm : MUBUF_LoadIntrinsicPat<SIbuffer_load_ushort,  i32, "BUFFER_LOAD_USHORT">;
 
 multiclass MUBUF_StoreIntrinsicPat<SDPatternOperator name, ValueType vt,
                                    string opcode> {
@@ -1171,6 +1176,8 @@ defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, f32, "BUFFER_STORE_FORMAT_
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, i32, "BUFFER_STORE_FORMAT_X">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v2f32, "BUFFER_STORE_FORMAT_XY">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v2i32, "BUFFER_STORE_FORMAT_XY">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v3f32, "BUFFER_STORE_FORMAT_XYZ">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v3i32, "BUFFER_STORE_FORMAT_XYZ">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v4f32, "BUFFER_STORE_FORMAT_XYZW">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_format, v4i32, "BUFFER_STORE_FORMAT_XYZW">;
 
@@ -1194,8 +1201,12 @@ defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, f32, "BUFFER_STORE_DWORD">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, i32, "BUFFER_STORE_DWORD">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v2f32, "BUFFER_STORE_DWORDX2">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v2i32, "BUFFER_STORE_DWORDX2">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v3f32, "BUFFER_STORE_DWORDX3">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v3i32, "BUFFER_STORE_DWORDX3">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v4f32, "BUFFER_STORE_DWORDX4">;
 defm : MUBUF_StoreIntrinsicPat<SIbuffer_store, v4i32, "BUFFER_STORE_DWORDX4">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_byte, i32, "BUFFER_STORE_BYTE">;
+defm : MUBUF_StoreIntrinsicPat<SIbuffer_store_short, i32, "BUFFER_STORE_SHORT">;
 
 //===----------------------------------------------------------------------===//
 // buffer_atomic patterns
@@ -1329,7 +1340,7 @@ multiclass MUBUFLoad_Atomic_Pattern <MUBUF_Pseudo Instr_ADDR64, MUBUF_Pseudo Ins
   >;
 }
 
-let SubtargetPredicate = isSICI in {
+let SubtargetPredicate = isGFX6GFX7 in {
 def : MUBUFLoad_PatternADDR64 <BUFFER_LOAD_SBYTE_ADDR64, i32, sextloadi8_constant>;
 def : MUBUFLoad_PatternADDR64 <BUFFER_LOAD_UBYTE_ADDR64, i32, az_extloadi8_constant>;
 def : MUBUFLoad_PatternADDR64 <BUFFER_LOAD_SSHORT_ADDR64, i32, sextloadi16_constant>;
@@ -1337,7 +1348,7 @@ def : MUBUFLoad_PatternADDR64 <BUFFER_LOAD_USHORT_ADDR64, i32, az_extloadi16_con
 
 defm : MUBUFLoad_Atomic_Pattern <BUFFER_LOAD_DWORD_ADDR64, BUFFER_LOAD_DWORD_OFFSET, i32, mubuf_load_atomic>;
 defm : MUBUFLoad_Atomic_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, BUFFER_LOAD_DWORDX2_OFFSET, i64, mubuf_load_atomic>;
-} // End SubtargetPredicate = isSICI
+} // End SubtargetPredicate = isGFX6GFX7
 
 multiclass MUBUFLoad_Pattern <MUBUF_Pseudo Instr_OFFSET, ValueType vt,
                                PatFrag ld> {
@@ -1399,6 +1410,7 @@ defm : MUBUFScratchLoadPat <BUFFER_LOAD_USHORT_OFFEN, BUFFER_LOAD_USHORT_OFFSET,
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_USHORT_OFFEN, BUFFER_LOAD_USHORT_OFFSET, i16, load_private>;
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_DWORD_OFFEN, BUFFER_LOAD_DWORD_OFFSET, i32, load_private>;
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_DWORDX2_OFFEN, BUFFER_LOAD_DWORDX2_OFFSET, v2i32, load_private>;
+defm : MUBUFScratchLoadPat <BUFFER_LOAD_DWORDX3_OFFEN, BUFFER_LOAD_DWORDX3_OFFSET, v3i32, load_private>;
 defm : MUBUFScratchLoadPat <BUFFER_LOAD_DWORDX4_OFFEN, BUFFER_LOAD_DWORDX4_OFFSET, v4i32, load_private>;
 
 let OtherPredicates = [D16PreservesUnusedBits] in {
@@ -1416,6 +1428,7 @@ defm : MUBUFScratchLoadPat_D16<BUFFER_LOAD_SHORT_D16_OFFEN, BUFFER_LOAD_SHORT_D1
 defm : MUBUFScratchLoadPat_D16<BUFFER_LOAD_UBYTE_D16_OFFEN, BUFFER_LOAD_UBYTE_D16_OFFSET, v2f16, az_extloadi8_d16_lo_private>;
 defm : MUBUFScratchLoadPat_D16<BUFFER_LOAD_SBYTE_D16_OFFEN, BUFFER_LOAD_SBYTE_D16_OFFSET, v2f16, sextloadi8_d16_lo_private>;
 }
+
 multiclass MUBUFStore_Atomic_Pattern <MUBUF_Pseudo Instr_ADDR64, MUBUF_Pseudo Instr_OFFSET,
                                       ValueType vt, PatFrag atomic_st> {
   // Store follows atomic op convention so address is forst
@@ -1430,10 +1443,10 @@ multiclass MUBUFStore_Atomic_Pattern <MUBUF_Pseudo Instr_ADDR64, MUBUF_Pseudo In
     (Instr_OFFSET $val, $rsrc, $soffset, (as_i16imm $offset), 0, 0, 0)
   >;
 }
-let SubtargetPredicate = isSICI in {
+let SubtargetPredicate = isGFX6GFX7 in {
 defm : MUBUFStore_Atomic_Pattern <BUFFER_STORE_DWORD_ADDR64, BUFFER_STORE_DWORD_OFFSET, i32, store_atomic_global>;
 defm : MUBUFStore_Atomic_Pattern <BUFFER_STORE_DWORDX2_ADDR64, BUFFER_STORE_DWORDX2_OFFSET, i64, store_atomic_global>;
-} // End Predicates = isSICI
+} // End Predicates = isGFX6GFX7
 
 
 multiclass MUBUFStore_Pattern <MUBUF_Pseudo Instr_OFFSET, ValueType vt,
@@ -1471,6 +1484,7 @@ defm : MUBUFScratchStorePat <BUFFER_STORE_BYTE_OFFEN, BUFFER_STORE_BYTE_OFFSET, 
 defm : MUBUFScratchStorePat <BUFFER_STORE_SHORT_OFFEN, BUFFER_STORE_SHORT_OFFSET, i16, store_private>;
 defm : MUBUFScratchStorePat <BUFFER_STORE_DWORD_OFFEN, BUFFER_STORE_DWORD_OFFSET, i32, store_private>;
 defm : MUBUFScratchStorePat <BUFFER_STORE_DWORDX2_OFFEN, BUFFER_STORE_DWORDX2_OFFSET, v2i32, store_private>;
+defm : MUBUFScratchStorePat <BUFFER_STORE_DWORDX3_OFFEN, BUFFER_STORE_DWORDX3_OFFSET, v3i32, store_private>;
 defm : MUBUFScratchStorePat <BUFFER_STORE_DWORDX4_OFFEN, BUFFER_STORE_DWORDX4_OFFSET, v4i32, store_private>;
 
 
@@ -1530,9 +1544,11 @@ multiclass MTBUF_LoadIntrinsicPat<SDPatternOperator name, ValueType vt,
 
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, i32,   "TBUFFER_LOAD_FORMAT_X">;
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v2i32, "TBUFFER_LOAD_FORMAT_XY">;
+defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v3i32, "TBUFFER_LOAD_FORMAT_XYZ">;
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v4i32, "TBUFFER_LOAD_FORMAT_XYZW">;
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, f32,   "TBUFFER_LOAD_FORMAT_X">;
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v2f32, "TBUFFER_LOAD_FORMAT_XY">;
+defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v3f32, "TBUFFER_LOAD_FORMAT_XYZ">;
 defm : MTBUF_LoadIntrinsicPat<SItbuffer_load, v4f32, "TBUFFER_LOAD_FORMAT_XYZW">;
 
 let SubtargetPredicate = HasUnpackedD16VMem in {
@@ -1586,11 +1602,11 @@ multiclass MTBUF_StoreIntrinsicPat<SDPatternOperator name, ValueType vt,
 
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, i32,   "TBUFFER_STORE_FORMAT_X">;
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v2i32, "TBUFFER_STORE_FORMAT_XY">;
-defm : MTBUF_StoreIntrinsicPat<SItbuffer_store_x3, v4i32, "TBUFFER_STORE_FORMAT_XYZ">;
+defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v3i32, "TBUFFER_STORE_FORMAT_XYZ">;
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v4i32, "TBUFFER_STORE_FORMAT_XYZW">;
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, f32,   "TBUFFER_STORE_FORMAT_X">;
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v2f32, "TBUFFER_STORE_FORMAT_XY">;
-defm : MTBUF_StoreIntrinsicPat<SItbuffer_store_x3, v4f32, "TBUFFER_STORE_FORMAT_XYZ">;
+defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v3f32, "TBUFFER_STORE_FORMAT_XYZ">;
 defm : MTBUF_StoreIntrinsicPat<SItbuffer_store, v4f32, "TBUFFER_STORE_FORMAT_XYZW">;
 
 let SubtargetPredicate = HasUnpackedD16VMem in {
@@ -1606,19 +1622,19 @@ let SubtargetPredicate = HasPackedD16VMem in {
 } // End HasPackedD16VMem.
 
 //===----------------------------------------------------------------------===//
-// Target instructions, move to the appropriate target TD file
+// Target-specific instruction encodings.
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
-// SI
+// Base ENC_MUBUF for GFX6, GFX7.
 //===----------------------------------------------------------------------===//
 
 class MUBUF_Real_si <bits<7> op, MUBUF_Pseudo ps> :
   MUBUF_Real<op, ps>,
   Enc64,
   SIMCInstr<ps.PseudoInstr, SIEncodingFamily.SI> {
-  let AssemblerPredicate=isSICI;
-  let DecoderNamespace="SICI";
+  let AssemblerPredicate=isGFX6GFX7;
+  let DecoderNamespace="GFX6GFX7";
 
   let Inst{11-0}  = !if(ps.has_offset, offset, ?);
   let Inst{12}    = ps.offen;
@@ -1744,8 +1760,8 @@ class MTBUF_Real_si <bits<3> op, MTBUF_Pseudo ps> :
   MTBUF_Real<ps>,
   Enc64,
   SIMCInstr<ps.PseudoInstr, SIEncodingFamily.SI> {
-  let AssemblerPredicate=isSICI;
-  let DecoderNamespace="SICI";
+  let AssemblerPredicate=isGFX6GFX7;
+  let DecoderNamespace="GFX6GFX7";
 
   let Inst{11-0}  = !if(ps.has_offset, offset, ?);
   let Inst{12}    = ps.offen;
@@ -1788,23 +1804,23 @@ defm TBUFFER_STORE_FORMAT_XYZW : MTBUF_Real_AllAddr_si <7>;
 
 class MUBUF_Real_ci <bits<7> op, MUBUF_Pseudo ps> :
   MUBUF_Real_si<op, ps> {
-  let AssemblerPredicate=isCIOnly;
-  let DecoderNamespace="CI";
+  let AssemblerPredicate = isGFX7Only;
+  let DecoderNamespace = "GFX7";
 }
 
 def BUFFER_WBINVL1_VOL_ci : MUBUF_Real_ci <0x70, BUFFER_WBINVL1_VOL>;
 
 
 //===----------------------------------------------------------------------===//
-// VI
+//  GFX8, GFX9 (VI).
 //===----------------------------------------------------------------------===//
 
 class MUBUF_Real_vi <bits<7> op, MUBUF_Pseudo ps> :
   MUBUF_Real<op, ps>,
   Enc64,
   SIMCInstr<ps.PseudoInstr, SIEncodingFamily.VI> {
-  let AssemblerPredicate=isVI;
-  let DecoderNamespace="VI";
+  let AssemblerPredicate = isGFX8GFX9;
+  let DecoderNamespace = "GFX8";
 
   let Inst{11-0}  = !if(ps.has_offset, offset, ?);
   let Inst{12}    = ps.offen;
@@ -1978,8 +1994,8 @@ class MTBUF_Real_vi <bits<4> op, MTBUF_Pseudo ps> :
   MTBUF_Real<ps>,
   Enc64,
   SIMCInstr<ps.PseudoInstr, SIEncodingFamily.VI> {
-  let AssemblerPredicate=isVI;
-  let DecoderNamespace="VI";
+  let AssemblerPredicate = isGFX8GFX9;
+  let DecoderNamespace = "GFX8";
 
   let Inst{11-0}  = !if(ps.has_offset, offset, ?);
   let Inst{12}    = ps.offen;

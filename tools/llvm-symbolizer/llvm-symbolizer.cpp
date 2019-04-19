@@ -94,10 +94,9 @@ ClBinaryName("obj", cl::init(""),
 static cl::alias
 ClBinaryNameAliasExe("exe", cl::desc("Alias for -obj"),
                      cl::NotHidden, cl::aliasopt(ClBinaryName));
-static cl::alias
-ClBinaryNameAliasE("e", cl::desc("Alias for -obj"),
-                   cl::NotHidden, cl::aliasopt(ClBinaryName));
-
+static cl::alias ClBinaryNameAliasE("e", cl::desc("Alias for -obj"),
+                                    cl::NotHidden, cl::Grouping, cl::Prefix,
+                                    cl::aliasopt(ClBinaryName));
 
 static cl::opt<std::string>
     ClDwpName("dwp", cl::init(""),
@@ -147,6 +146,14 @@ static cl::opt<std::string>
     ClFallbackDebugPath("fallback-debug-path", cl::init(""),
                         cl::desc("Fallback path for debug binaries."));
 
+static cl::opt<DIPrinter::OutputStyle>
+    ClOutputStyle("output-style", cl::init(DIPrinter::OutputStyle::LLVM),
+                  cl::desc("Specify print style"), cl::Hidden,
+                  cl::values(clEnumValN(DIPrinter::OutputStyle::LLVM, "LLVM",
+                                        "LLVM default style"),
+                             clEnumValN(DIPrinter::OutputStyle::GNU, "GNU",
+                                        "GNU addr2line style")));
+
 template<typename T>
 static bool error(Expected<T> &ResOrErr) {
   if (ResOrErr)
@@ -194,48 +201,6 @@ static bool parseCommand(StringRef InputString, bool &IsData,
   return !StringRef(pos, offset_length).getAsInteger(0, ModuleOffset);
 }
 
-// This routine returns section index for an address.
-// Assumption: would work ambiguously for object files which have sections not
-// assigned to an address(since the same address could belong to various
-// sections).
-static uint64_t getModuleSectionIndexForAddress(const std::string &ModuleName,
-                                                uint64_t Address) {
-
-  // following ModuleName processing was copied from
-  // LLVMSymbolizer::getOrCreateModuleInfo().
-  // it needs to be refactored to avoid code duplication.
-  std::string BinaryName = ModuleName;
-  size_t ColonPos = ModuleName.find_last_of(':');
-  // Verify that substring after colon form a valid arch name.
-  if (ColonPos != std::string::npos) {
-    std::string ArchStr = ModuleName.substr(ColonPos + 1);
-    if (Triple(ArchStr).getArch() != Triple::UnknownArch) {
-      BinaryName = ModuleName.substr(0, ColonPos);
-    }
-  }
-
-  Expected<OwningBinary<Binary>> BinaryOrErr = createBinary(BinaryName);
-
-  if (error(BinaryOrErr))
-    return object::SectionedAddress::UndefSection;
-
-  Binary &Binary = *BinaryOrErr->getBinary();
-
-  if (ObjectFile *O = dyn_cast<ObjectFile>(&Binary)) {
-    for (SectionRef Sec : O->sections()) {
-      if (!Sec.isText() || Sec.isVirtual())
-        continue;
-
-      if (Address >= Sec.getAddress() &&
-          Address <= Sec.getAddress() + Sec.getSize()) {
-        return Sec.getIndex();
-      }
-    }
-  }
-
-  return object::SectionedAddress::UndefSection;
-}
-
 static void symbolizeInput(StringRef InputString, LLVMSymbolizer &Symbolizer,
                            DIPrinter &Printer) {
   bool IsData = false;
@@ -253,18 +218,19 @@ static void symbolizeInput(StringRef InputString, LLVMSymbolizer &Symbolizer,
     outs() << Delimiter;
   }
   Offset -= ClAdjustVMA;
-  object::SectionedAddress ModuleOffset = {
-      Offset, getModuleSectionIndexForAddress(ModuleName, Offset)};
   if (IsData) {
-    auto ResOrErr = Symbolizer.symbolizeData(ModuleName, ModuleOffset);
+    auto ResOrErr = Symbolizer.symbolizeData(
+        ModuleName, {Offset, object::SectionedAddress::UndefSection});
     Printer << (error(ResOrErr) ? DIGlobal() : ResOrErr.get());
   } else if (ClPrintInlining) {
-    auto ResOrErr =
-        Symbolizer.symbolizeInlinedCode(ModuleName, ModuleOffset, ClDwpName);
+    auto ResOrErr = Symbolizer.symbolizeInlinedCode(
+        ModuleName, {Offset, object::SectionedAddress::UndefSection},
+        ClDwpName);
     Printer << (error(ResOrErr) ? DIInliningInfo() : ResOrErr.get());
   } else {
-    auto ResOrErr =
-        Symbolizer.symbolizeCode(ModuleName, ModuleOffset, ClDwpName);
+    auto ResOrErr = Symbolizer.symbolizeCode(
+        ModuleName, {Offset, object::SectionedAddress::UndefSection},
+        ClDwpName);
     Printer << (error(ResOrErr) ? DILineInfo() : ResOrErr.get());
   }
   outs() << "\n";
@@ -297,7 +263,7 @@ int main(int argc, char **argv) {
 
   DIPrinter Printer(outs(), ClPrintFunctions != FunctionNameKind::None,
                     ClPrettyPrint, ClPrintSourceContextLines, ClVerbose,
-                    ClBasenames);
+                    ClBasenames, ClOutputStyle);
 
   if (ClInputAddresses.empty()) {
     const int kMaxInputStringLength = 1024;

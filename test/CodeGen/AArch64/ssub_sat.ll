@@ -10,7 +10,7 @@ define i32 @func(i32 %x, i32 %y) nounwind {
 ; CHECK-LABEL: func:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    subs w8, w0, w1
-; CHECK-NEXT:    orr w9, wzr, #0x7fffffff
+; CHECK-NEXT:    mov w9, #2147483647
 ; CHECK-NEXT:    cmp w8, #0 // =0
 ; CHECK-NEXT:    cinv w8, w9, ge
 ; CHECK-NEXT:    subs w9, w0, w1
@@ -24,7 +24,7 @@ define i64 @func2(i64 %x, i64 %y) nounwind {
 ; CHECK-LABEL: func2:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    subs x8, x0, x1
-; CHECK-NEXT:    orr x9, xzr, #0x7fffffffffffffff
+; CHECK-NEXT:    mov x9, #9223372036854775807
 ; CHECK-NEXT:    cmp x8, #0 // =0
 ; CHECK-NEXT:    cinv x8, x9, ge
 ; CHECK-NEXT:    subs x9, x0, x1
@@ -39,7 +39,7 @@ define i4 @func3(i4 %x, i4 %y) nounwind {
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    lsl w8, w0, #28
 ; CHECK-NEXT:    subs w10, w8, w1, lsl #28
-; CHECK-NEXT:    orr w9, wzr, #0x7fffffff
+; CHECK-NEXT:    mov w9, #2147483647
 ; CHECK-NEXT:    cmp w10, #0 // =0
 ; CHECK-NEXT:    cinv w9, w9, ge
 ; CHECK-NEXT:    subs w8, w8, w1, lsl #28
@@ -56,16 +56,15 @@ define <4 x i32> @vec(<4 x i32> %x, <4 x i32> %y) nounwind {
 ; CHECK-NEXT:    sub v2.4s, v0.4s, v1.4s
 ; CHECK-NEXT:    cmge v1.4s, v1.4s, #0
 ; CHECK-NEXT:    cmge v0.4s, v0.4s, #0
-; CHECK-NEXT:    cmge v4.4s, v2.4s, #0
-; CHECK-NEXT:    movi v3.4s, #128, lsl #24
-; CHECK-NEXT:    cmeq v1.4s, v0.4s, v1.4s
-; CHECK-NEXT:    cmeq v0.4s, v0.4s, v4.4s
+; CHECK-NEXT:    cmge v5.4s, v2.4s, #0
 ; CHECK-NEXT:    cmlt v4.4s, v2.4s, #0
-; CHECK-NEXT:    bic v3.16b, v3.16b, v4.16b
-; CHECK-NEXT:    bic v4.4s, #128, lsl #24
+; CHECK-NEXT:    cmeq v1.4s, v0.4s, v1.4s
+; CHECK-NEXT:    cmeq v0.4s, v0.4s, v5.4s
+; CHECK-NEXT:    mvni v3.4s, #128, lsl #24
+; CHECK-NEXT:    mvn v5.16b, v4.16b
 ; CHECK-NEXT:    mvn v1.16b, v1.16b
 ; CHECK-NEXT:    mvn v0.16b, v0.16b
-; CHECK-NEXT:    orr v3.16b, v4.16b, v3.16b
+; CHECK-NEXT:    bsl v3.16b, v4.16b, v5.16b
 ; CHECK-NEXT:    and v0.16b, v1.16b, v0.16b
 ; CHECK-NEXT:    bsl v0.16b, v3.16b, v2.16b
 ; CHECK-NEXT:    ret

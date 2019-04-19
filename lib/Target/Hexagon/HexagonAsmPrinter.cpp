@@ -113,7 +113,6 @@ bool HexagonAsmPrinter::isBlockOnlyReachableByFallthrough(
 
 /// PrintAsmOperand - Print out an operand for an inline asm expression.
 bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
-                                        unsigned AsmVariant,
                                         const char *ExtraCode,
                                         raw_ostream &OS) {
   // Does this asm operand have a single letter operand modifier?
@@ -124,11 +123,7 @@ bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     switch (ExtraCode[0]) {
     default:
       // See if this is a generic print operand
-      return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, OS);
-    case 'c': // Don't print "$" before a global var name or constant.
-      // Hexagon never has a prefix.
-      printOperand(MI, OpNo, OS);
-      return false;
+      return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
     case 'L':
     case 'H': { // The highest-numbered register of a pair.
       const MachineOperand &MO = MI->getOperand(OpNo);
@@ -160,7 +155,6 @@ bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
 
 bool HexagonAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
                                               unsigned OpNo,
-                                              unsigned AsmVariant,
                                               const char *ExtraCode,
                                               raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])

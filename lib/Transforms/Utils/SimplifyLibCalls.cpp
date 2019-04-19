@@ -16,8 +16,10 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -34,6 +36,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
+#include "llvm/Transforms/Utils/SizeOpts.h"
 
 using namespace llvm;
 using namespace PatternMatch;
@@ -101,6 +104,12 @@ static bool isOnlyUsedInEqualityComparison(Value *V, Value *With) {
 static bool callHasFloatingPointArgument(const CallInst *CI) {
   return any_of(CI->operands(), [](const Use &OI) {
     return OI->getType()->isFloatingPointTy();
+  });
+}
+
+static bool callHasFP128Argument(const CallInst *CI) {
+  return any_of(CI->operands(), [](const Use &OI) {
+    return OI->getType()->isFP128Ty();
   });
 }
 
@@ -776,7 +785,8 @@ Value *LibCallSimplifier::optimizeMemChr(CallInst *CI, IRBuilder<> &B) {
   // It would be really nice to reuse switch lowering here but we can't change
   // the CFG at this point.
   //
-  // memchr("\r\n", C, 2) != nullptr -> (C & ((1 << '\r') | (1 << '\n'))) != 0
+  // memchr("\r\n", C, 2) != nullptr -> (1 << C & ((1 << '\r') | (1 << '\n')))
+  // != 0
   //   after bounds check.
   if (!CharC && !Str.empty() && isOnlyUsedInZeroEqualityComparison(CI)) {
     unsigned char Max =
@@ -921,7 +931,7 @@ Value *LibCallSimplifier::optimizeMemCmp(CallInst *CI, IRBuilder<> &B) {
 
   // memcmp(x, y, Len) == 0 -> bcmp(x, y, Len) == 0
   // `bcmp` can be more efficient than memcmp because it only has to know that
-  // there is a difference, not where is is.
+  // there is a difference, not where it is.
   if (isOnlyUsedInZeroEqualityComparison(CI) && TLI->has(LibFunc_bcmp)) {
     return emitBCmp(LHS, RHS, Size, B, DL, TLI);
   }
@@ -2050,6 +2060,20 @@ Value *LibCallSimplifier::optimizePrintF(CallInst *CI, IRBuilder<> &B) {
     B.Insert(New);
     return New;
   }
+
+  // printf(format, ...) -> __small_printf(format, ...) if no 128-bit floating point
+  // arguments.
+  if (TLI->has(LibFunc_small_printf) && !callHasFP128Argument(CI)) {
+    Module *M = B.GetInsertBlock()->getParent()->getParent();
+    auto SmallPrintFFn =
+        M->getOrInsertFunction(TLI->getName(LibFunc_small_printf),
+                               FT, Callee->getAttributes());
+    CallInst *New = cast<CallInst>(CI->clone());
+    New->setCalledFunction(SmallPrintFFn);
+    B.Insert(New);
+    return New;
+  }
+
   return nullptr;
 }
 
@@ -2094,7 +2118,8 @@ Value *LibCallSimplifier::optimizeSPrintFString(CallInst *CI, IRBuilder<> &B) {
   }
 
   if (FormatStr[1] == 's') {
-    // sprintf(dest, "%s", str) -> llvm.memcpy(dest, str, strlen(str)+1, 1)
+    // sprintf(dest, "%s", str) -> llvm.memcpy(align 1 dest, align 1 str,
+    // strlen(str)+1)
     if (!CI->getArgOperand(2)->getType()->isPointerTy())
       return nullptr;
 
@@ -2129,6 +2154,20 @@ Value *LibCallSimplifier::optimizeSPrintF(CallInst *CI, IRBuilder<> &B) {
     B.Insert(New);
     return New;
   }
+
+  // sprintf(str, format, ...) -> __small_sprintf(str, format, ...) if no 128-bit
+  // floating point arguments.
+  if (TLI->has(LibFunc_small_sprintf) && !callHasFP128Argument(CI)) {
+    Module *M = B.GetInsertBlock()->getParent()->getParent();
+    auto SmallSPrintFFn =
+        M->getOrInsertFunction(TLI->getName(LibFunc_small_sprintf),
+                               FT, Callee->getAttributes());
+    CallInst *New = cast<CallInst>(CI->clone());
+    New->setCalledFunction(SmallSPrintFFn);
+    B.Insert(New);
+    return New;
+  }
+
   return nullptr;
 }
 
@@ -2157,7 +2196,7 @@ Value *LibCallSimplifier::optimizeSnPrintFString(CallInst *CI, IRBuilder<> &B) {
     else if (N < FormatStr.size() + 1)
       return nullptr;
 
-    // sprintf(str, size, fmt) -> llvm.memcpy(align 1 str, align 1 fmt,
+    // snprintf(dst, size, fmt) -> llvm.memcpy(align 1 dst, align 1 fmt,
     // strlen(fmt)+1)
     B.CreateMemCpy(
         CI->getArgOperand(0), 1, CI->getArgOperand(2), 1,
@@ -2286,6 +2325,20 @@ Value *LibCallSimplifier::optimizeFPrintF(CallInst *CI, IRBuilder<> &B) {
     B.Insert(New);
     return New;
   }
+
+  // fprintf(stream, format, ...) -> __small_fprintf(stream, format, ...) if no
+  // 128-bit floating point arguments.
+  if (TLI->has(LibFunc_small_fprintf) && !callHasFP128Argument(CI)) {
+    Module *M = B.GetInsertBlock()->getParent()->getParent();
+    auto SmallFPrintFFn =
+        M->getOrInsertFunction(TLI->getName(LibFunc_small_fprintf),
+                               FT, Callee->getAttributes());
+    CallInst *New = cast<CallInst>(CI->clone());
+    New->setCalledFunction(SmallFPrintFFn);
+    B.Insert(New);
+    return New;
+  }
+
   return nullptr;
 }
 
@@ -2325,7 +2378,9 @@ Value *LibCallSimplifier::optimizeFPuts(CallInst *CI, IRBuilder<> &B) {
 
   // Don't rewrite fputs to fwrite when optimising for size because fwrite
   // requires more arguments and thus extra MOVs are required.
-  if (CI->getFunction()->optForSize())
+  bool OptForSize = CI->getFunction()->hasOptSize() ||
+                    llvm::shouldOptimizeForSize(CI->getParent(), PSI, BFI);
+  if (OptForSize)
     return nullptr;
 
   // Check if has any use
@@ -2338,7 +2393,7 @@ Value *LibCallSimplifier::optimizeFPuts(CallInst *CI, IRBuilder<> &B) {
       return nullptr;
   }
 
-  // fputs(s,F) --> fwrite(s,1,strlen(s),F)
+  // fputs(s,F) --> fwrite(s,strlen(s),1,F)
   uint64_t Len = GetStringLength(CI->getArgOperand(0));
   if (!Len)
     return nullptr;
@@ -2385,18 +2440,14 @@ Value *LibCallSimplifier::optimizeFRead(CallInst *CI, IRBuilder<> &B) {
 }
 
 Value *LibCallSimplifier::optimizePuts(CallInst *CI, IRBuilder<> &B) {
-  // Check for a constant string.
-  StringRef Str;
-  if (!getConstantStringInfo(CI->getArgOperand(0), Str))
+  if (!CI->use_empty())
     return nullptr;
 
-  if (Str.empty() && CI->use_empty()) {
-    // puts("") -> putchar('\n')
-    Value *Res = emitPutChar(B.getInt32('\n'), B, TLI);
-    if (CI->use_empty() || !Res)
-      return Res;
-    return B.CreateIntCast(Res, CI->getType(), true);
-  }
+  // Check for a constant string.
+  // puts("") -> putchar('\n')
+  StringRef Str;
+  if (getConstantStringInfo(CI->getArgOperand(0), Str) && Str.empty())
+    return emitPutChar(B.getInt32('\n'), B, TLI);
 
   return nullptr;
 }
@@ -2704,9 +2755,10 @@ Value *LibCallSimplifier::optimizeCall(CallInst *CI) {
 LibCallSimplifier::LibCallSimplifier(
     const DataLayout &DL, const TargetLibraryInfo *TLI,
     OptimizationRemarkEmitter &ORE,
+    BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
     function_ref<void(Instruction *, Value *)> Replacer,
     function_ref<void(Instruction *)> Eraser)
-    : FortifiedSimplifier(TLI), DL(DL), TLI(TLI), ORE(ORE),
+    : FortifiedSimplifier(TLI), DL(DL), TLI(TLI), ORE(ORE), BFI(BFI), PSI(PSI),
       UnsafeFPShrink(false), Replacer(Replacer), Eraser(Eraser) {}
 
 void LibCallSimplifier::replaceAllUsesWith(Instruction *I, Value *With) {

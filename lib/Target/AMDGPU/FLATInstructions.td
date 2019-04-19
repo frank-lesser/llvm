@@ -63,6 +63,8 @@ class FLAT_Pseudo<string opName, dag outs, dag ins,
   // and are not considered done until both have been decremented.
   let VM_CNT = 1;
   let LGKM_CNT = !if(!or(is_flat_global, is_flat_scratch), 0, 1);
+
+  let IsNonFlatSeg = !if(!or(is_flat_global, is_flat_scratch), 1, 0);
 }
 
 class FLAT_Real <bits<7> op, FLAT_Pseudo ps> :
@@ -490,7 +492,8 @@ defm FLAT_ATOMIC_INC_X2     : FLAT_Atomic_Pseudo <"flat_atomic_inc_x2",
 defm FLAT_ATOMIC_DEC_X2     : FLAT_Atomic_Pseudo <"flat_atomic_dec_x2",
                                 VReg_64, i64, atomic_dec_flat>;
 
-let SubtargetPredicate = isCI in { // CI Only flat instructions : FIXME Only?
+// GFX7-only flat instructions.
+let SubtargetPredicate = isGFX7Only in {
 
 defm FLAT_ATOMIC_FCMPSWAP    : FLAT_Atomic_Pseudo <"flat_atomic_fcmpswap",
                                 VGPR_32, f32, null_frag, v2f32, VReg_64>;
@@ -510,7 +513,7 @@ defm FLAT_ATOMIC_FMIN_X2     : FLAT_Atomic_Pseudo <"flat_atomic_fmin_x2",
 defm FLAT_ATOMIC_FMAX_X2     : FLAT_Atomic_Pseudo <"flat_atomic_fmax_x2",
                                 VReg_64, f64>;
 
-} // End SubtargetPredicate = isCI
+} // End SubtargetPredicate = isGFX7Only
 
 let SubtargetPredicate = HasFlatGlobalInsts in {
 defm GLOBAL_LOAD_UBYTE    : FLAT_Global_Load_Pseudo <"global_load_ubyte", VGPR_32>;
@@ -730,6 +733,7 @@ def : FlatLoadPat <FLAT_LOAD_USHORT, load_flat, i16>;
 def : FlatLoadPat <FLAT_LOAD_SSHORT, sextloadi16_flat, i32>;
 def : FlatLoadPat <FLAT_LOAD_DWORD, load_flat, i32>;
 def : FlatLoadPat <FLAT_LOAD_DWORDX2, load_flat, v2i32>;
+def : FlatLoadPat <FLAT_LOAD_DWORDX3, load_flat, v3i32>;
 def : FlatLoadPat <FLAT_LOAD_DWORDX4, load_flat, v4i32>;
 
 def : FlatLoadAtomicPat <FLAT_LOAD_DWORD, atomic_load_flat, i32>;
@@ -739,6 +743,7 @@ def : FlatStorePat <FLAT_STORE_BYTE, truncstorei8_flat, i32>;
 def : FlatStorePat <FLAT_STORE_SHORT, truncstorei16_flat, i32>;
 def : FlatStorePat <FLAT_STORE_DWORD, store_flat, i32>;
 def : FlatStorePat <FLAT_STORE_DWORDX2, store_flat, v2i32>;
+def : FlatStorePat <FLAT_STORE_DWORDX3, store_flat, v3i32>;
 def : FlatStorePat <FLAT_STORE_DWORDX4, store_flat, v4i32>;
 
 def : FlatStoreAtomicPat <FLAT_STORE_DWORD, atomic_store_flat, i32>;
@@ -808,6 +813,7 @@ def : FlatLoadSignedPat <GLOBAL_LOAD_USHORT, load_global, i16>;
 
 def : FlatLoadSignedPat <GLOBAL_LOAD_DWORD, load_global, i32>;
 def : FlatLoadSignedPat <GLOBAL_LOAD_DWORDX2, load_global, v2i32>;
+def : FlatLoadSignedPat <GLOBAL_LOAD_DWORDX3, load_global, v3i32>;
 def : FlatLoadSignedPat <GLOBAL_LOAD_DWORDX4, load_global, v4i32>;
 
 def : FlatLoadAtomicPat <GLOBAL_LOAD_DWORD, atomic_load_global, i32>;
@@ -819,6 +825,7 @@ def : FlatStoreSignedPat <GLOBAL_STORE_SHORT, truncstorei16_global, i32>;
 def : FlatStoreSignedPat <GLOBAL_STORE_SHORT, store_global, i16>;
 def : FlatStoreSignedPat <GLOBAL_STORE_DWORD, store_global, i32>;
 def : FlatStoreSignedPat <GLOBAL_STORE_DWORDX2, store_global, v2i32>;
+def : FlatStoreSignedPat <GLOBAL_STORE_DWORDX3, store_global, v3i32>;
 def : FlatStoreSignedPat <GLOBAL_STORE_DWORDX4, store_global, v4i32>;
 
 let OtherPredicates = [D16PreservesUnusedBits] in {
@@ -885,8 +892,8 @@ def : FlatSignedAtomicPat <GLOBAL_ATOMIC_XOR_X2_RTN, atomic_xor_global, i64>;
 class FLAT_Real_ci <bits<7> op, FLAT_Pseudo ps> :
   FLAT_Real <op, ps>,
   SIMCInstr <ps.PseudoInstr, SIEncodingFamily.SI> {
-  let AssemblerPredicate = isCIOnly;
-  let DecoderNamespace="CI";
+  let AssemblerPredicate = isGFX7Only;
+  let DecoderNamespace="GFX7";
 }
 
 def FLAT_LOAD_UBYTE_ci         : FLAT_Real_ci <0x8,  FLAT_LOAD_UBYTE>;
@@ -953,8 +960,8 @@ defm FLAT_ATOMIC_FMAX_X2       : FLAT_Real_Atomics_ci <0x60, FLAT_ATOMIC_FMAX_X2
 class FLAT_Real_vi <bits<7> op, FLAT_Pseudo ps> :
   FLAT_Real <op, ps>,
   SIMCInstr <ps.PseudoInstr, SIEncodingFamily.VI> {
-  let AssemblerPredicate = isVI;
-  let DecoderNamespace="VI";
+  let AssemblerPredicate = isGFX8GFX9;
+  let DecoderNamespace = "GFX8";
 }
 
 multiclass FLAT_Real_AllAddr_vi<bits<7> op> {

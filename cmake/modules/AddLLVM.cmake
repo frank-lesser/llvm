@@ -221,13 +221,19 @@ function(add_link_opts target_name)
       elseif(${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
         set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                      LINK_FLAGS " -Wl,-z -Wl,discard-unused=sections")
-      elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
+      elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD AND
+             NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD|AIX")
         # Object files are compiled with -ffunction-data-sections.
         # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
         # tools that use plugins. Always pass --gc-sections once we require
         # a newer linker.
         set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                      LINK_FLAGS " -Wl,--gc-sections")
+      endif()
+    else() #LLVM_NO_DEAD_STRIP
+      if(${CMAKE_SYSTEM_NAME} MATCHES "AIX")
+        set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                     LINK_FLAGS " -Wl,-bnogc")
       endif()
     endif()
   endif()
@@ -663,6 +669,7 @@ macro(add_llvm_library name)
         set(install_type LIBRARY)
       endif()
 
+      set(export_to_llvmexports)
       if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
           (in_llvm_libs AND "llvm-libraries" IN_LIST LLVM_DISTRIBUTION_COMPONENTS) OR
           NOT LLVM_DISTRIBUTION_COMPONENTS)
@@ -868,6 +875,7 @@ macro(add_llvm_tool name)
 
   if ( ${name} IN_LIST LLVM_TOOLCHAIN_TOOLS OR NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     if( LLVM_BUILD_TOOLS )
+      set(export_to_llvmexports)
       if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
           NOT LLVM_DISTRIBUTION_COMPONENTS)
         set(export_to_llvmexports EXPORT LLVMExports)
@@ -915,6 +923,7 @@ macro(add_llvm_utility name)
   set_target_properties(${name} PROPERTIES FOLDER "Utils")
   if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     if (LLVM_INSTALL_UTILS AND LLVM_BUILD_UTILS)
+      set(export_to_llvmexports)
       if (${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
           NOT LLVM_DISTRIBUTION_COMPONENTS)
         set(export_to_llvmexports EXPORT LLVMExports)
@@ -1305,7 +1314,7 @@ function(get_llvm_lit_path base_dir file_name)
         set(${base_dir} ${LIT_BASE_DIR} PARENT_SCOPE)
         return()
       else()
-        message(WARN "LLVM_EXTERNAL_LIT set to ${LLVM_EXTERNAL_LIT}, but the path does not exist.")
+        message(WARNING "LLVM_EXTERNAL_LIT set to ${LLVM_EXTERNAL_LIT}, but the path does not exist.")
       endif()
     endif()
   endif()
@@ -1595,14 +1604,21 @@ function(llvm_externalize_debuginfo name)
     endif()
   endif()
 
-  if(LLVM_EXTERNALIZE_DEBUGINFO_OUTPUT_DIR)
-    if(APPLE)
-      set(output_name "$<TARGET_FILE_NAME:${name}>.dSYM")
-      set(output_path "-o=${LLVM_EXTERNALIZE_DEBUGINFO_OUTPUT_DIR}/${output_name}")
-    endif()
-  endif()
-
   if(APPLE)
+    if(LLVM_EXTERNALIZE_DEBUGINFO_EXTENSION)
+      set(file_ext ${LLVM_EXTERNALIZE_DEBUGINFO_EXTENSION})
+    else()
+      set(file_ext dSYM)
+    endif()
+
+    set(output_name "$<TARGET_FILE_NAME:${name}>.${file_ext}")
+
+    if(LLVM_EXTERNALIZE_DEBUGINFO_OUTPUT_DIR)
+      set(output_path "-o=${LLVM_EXTERNALIZE_DEBUGINFO_OUTPUT_DIR}/${output_name}")
+    else()
+      set(output_path "-o=${output_name}")
+    endif()
+
     if(CMAKE_CXX_FLAGS MATCHES "-flto"
       OR CMAKE_CXX_FLAGS_${uppercase_CMAKE_BUILD_TYPE} MATCHES "-flto")
 

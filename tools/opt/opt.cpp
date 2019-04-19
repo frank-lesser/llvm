@@ -173,11 +173,6 @@ static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
 
 static cl::opt<bool>
-UnitAtATime("funit-at-a-time",
-            cl::desc("Enable IPO. This corresponds to gcc's -funit-at-a-time"),
-            cl::init(true));
-
-static cl::opt<bool>
 DisableLoopUnrolling("disable-loop-unrolling",
                      cl::desc("Disable loop unrolling in all relevant passes"),
                      cl::init(false));
@@ -274,6 +269,12 @@ static cl::opt<std::string>
     RemarksFilename("pass-remarks-output",
                     cl::desc("YAML output filename for pass remarks"),
                     cl::value_desc("filename"));
+
+static cl::opt<std::string>
+    RemarksPasses("pass-remarks-filter",
+                  cl::desc("Only record optimization remarks from passes whose "
+                           "names match the given regular expression"),
+                  cl::value_desc("regex"));
 
 cl::opt<PGOKind>
     PGOKindFlag("pgo-kind", cl::init(NoPGO), cl::Hidden,
@@ -377,7 +378,6 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   } else {
     Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
-  Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
                                DisableLoopUnrolling : OptLevel == 0;
 
@@ -566,6 +566,12 @@ int main(int argc, char **argv) {
     }
     Context.setRemarkStreamer(llvm::make_unique<RemarkStreamer>(
         RemarksFilename, OptRemarkFile->os()));
+
+    if (!RemarksPasses.empty())
+      if (Error E = Context.getRemarkStreamer()->setFilter(RemarksPasses)) {
+        errs() << E << '\n';
+        return 1;
+      }
   }
 
   // Load the input module...

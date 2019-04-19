@@ -54,26 +54,6 @@ false:
 
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %2:_(s32) = G_ZEXTLOAD %1:_(p0) :: (load 3 from `i24* undef`, align 1) (in function: odd_type_load)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_type_load
-; FALLBACK-WITH-REPORT-OUT-LABEL: odd_type_load
-define i32 @odd_type_load() {
-entry:
-  %ld = load i24, i24* undef, align 1
-  %cst = zext i24 %ld to i32
-  ret i32 %cst
-}
-
-  ; General legalizer inability to handle types whose size wasn't a power of 2.
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %1:_(s42), %0:_(p0) :: (store 6 into %ir.addr, align 8) (in function: odd_type)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_type
-; FALLBACK-WITH-REPORT-OUT-LABEL: odd_type:
-define void @odd_type(i42* %addr) {
-  %val42 = load i42, i42* %addr
-  store i42 %val42, i42* %addr
-  ret void
-}
-
 ; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %1:_(<7 x s32>), %0:_(p0) :: (store 28 into %ir.addr, align 32) (in function: odd_vector)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for odd_vector
 ; FALLBACK-WITH-REPORT-OUT-LABEL: odd_vector:
@@ -158,7 +138,7 @@ end:
   br label %block
 }
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: G_STORE %2:_(<2 x p0>), %1:_(p0) :: (store 16 into `<2 x i16*>* undef`) (in function: vector_of_pointers_insertelement)
+; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %2:_(<2 x p0>) = G_INSERT_VECTOR_ELT %0:_, %3:_(p0), %5:_(s32) (in function: vector_of_pointers_insertelement)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
 ; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
 define void @vector_of_pointers_insertelement() {
@@ -212,14 +192,6 @@ define void @nonpow2_store_narrowing(i96* %c) {
   %a = add i128 undef, undef
   %b = trunc i128 %a to i96
   store i96 %b, i96* %c
-  ret void
-}
-
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %0:_(s96) = G_CONSTANT i96 0 (in function: nonpow2_constant_narrowing)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for nonpow2_constant_narrowing
-; FALLBACK-WITH-REPORT-OUT-LABEL: nonpow2_constant_narrowing:
-define void @nonpow2_constant_narrowing() {
-  store i96 0, i96* undef
   ret void
 }
 

@@ -137,6 +137,10 @@ bool SIInsertSkips::shouldSkip(const MachineBasicBlock &From,
       if (TII->hasUnwantedEffectsWhenEXECEmpty(*I))
         return true;
 
+      // These instructions are potentially expensive even if EXEC = 0.
+      if (TII->isSMRD(*I) || TII->isVMEM(*I) || I->getOpcode() == AMDGPU::S_WAITCNT)
+        return true;
+
       ++NumInstr;
       if (NumInstr >= SkipThreshold)
         return true;
@@ -176,7 +180,7 @@ bool SIInsertSkips::skipIfDead(MachineInstr &MI, MachineBasicBlock &NextBB) {
     .addImm(0); // en
 
   // ... and terminate wavefront.
-  BuildMI(*SkipBB, Insert, DL, TII->get(AMDGPU::S_ENDPGM));
+  BuildMI(*SkipBB, Insert, DL, TII->get(AMDGPU::S_ENDPGM)).addImm(0);
 
   return true;
 }

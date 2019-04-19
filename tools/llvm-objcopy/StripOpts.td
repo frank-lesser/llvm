@@ -9,6 +9,12 @@ multiclass Eq<string name, string help> {
 
 def help : Flag<["-", "--"], "help">;
 
+def allow_broken_links
+    : Flag<["-", "--"], "allow-broken-links">,
+      HelpText<"Allow llvm-strip to remove sections even if it would leave "
+               "invalid section references. The appropriate sh_link fields"
+               "will be set to zero.">;
+
 def enable_deterministic_archives
     : Flag<["-", "--"], "enable-deterministic-archives">,
       HelpText<"Enable deterministic mode when stripping archives (use zero "
@@ -31,10 +37,9 @@ def preserve_dates : Flag<["-", "--"], "preserve-dates">,
                      HelpText<"Preserve access and modification timestamps">;
 def p : Flag<["-"], "p">, Alias<preserve_dates>;
 
-def strip_all
-    : Flag<["-", "--"], "strip-all">,
-      HelpText<
-          "Remove non-allocated sections other than .gnu.warning* sections">;
+def strip_all : Flag<["-", "--"], "strip-all">,
+                HelpText<"Remove non-allocated sections outside segments. "
+                         ".gnu.warning* sections are not removed">;
 def s : Flag<["-"], "s">, Alias<strip_all>;
 
 def strip_all_gnu : Flag<["-", "--"], "strip-all-gnu">,
@@ -63,6 +68,11 @@ def keep_file_symbols : Flag<["-", "--"], "keep-file-symbols">,
                         HelpText<"Do not remove file symbols">;
 
 def K : JoinedOrSeparate<["-"], "K">, Alias<keep_symbol>;
+
+def only_keep_debug
+    : Flag<["-", "--"], "only-keep-debug">,
+      HelpText<"Clear sections that would not be stripped by --strip-debug. "
+               "Currently only implemented for COFF.">;
 
 def discard_locals : Flag<["-", "--"], "discard-locals">,
                      HelpText<"Remove compiler-generated local symbols, (e.g. "

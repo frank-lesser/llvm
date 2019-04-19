@@ -226,7 +226,7 @@ DecodeStatus AMDGPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
     // Try decode 32-bit instruction
     if (Bytes.size() < 4) break;
     const uint32_t DW = eatBytes<uint32_t>(Bytes);
-    Res = tryDecodeInst(DecoderTableVI32, MI, DW, Address);
+    Res = tryDecodeInst(DecoderTableGFX832, MI, DW, Address);
     if (Res) break;
 
     Res = tryDecodeInst(DecoderTableAMDGPU32, MI, DW, Address);
@@ -237,7 +237,7 @@ DecodeStatus AMDGPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
 
     if (Bytes.size() < 4) break;
     const uint64_t QW = ((uint64_t)eatBytes<uint32_t>(Bytes) << 32) | DW;
-    Res = tryDecodeInst(DecoderTableVI64, MI, QW, Address);
+    Res = tryDecodeInst(DecoderTableGFX864, MI, QW, Address);
     if (Res) break;
 
     Res = tryDecodeInst(DecoderTableAMDGPU64, MI, QW, Address);
@@ -779,10 +779,10 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg32(unsigned Val) const {
   case 105: return createRegOperand(XNACK_MASK_HI);
   case 106: return createRegOperand(VCC_LO);
   case 107: return createRegOperand(VCC_HI);
-  case 108: assert(!isGFX9()); return createRegOperand(TBA_LO);
-  case 109: assert(!isGFX9()); return createRegOperand(TBA_HI);
-  case 110: assert(!isGFX9()); return createRegOperand(TMA_LO);
-  case 111: assert(!isGFX9()); return createRegOperand(TMA_HI);
+  case 108: return createRegOperand(TBA_LO);
+  case 109: return createRegOperand(TBA_HI);
+  case 110: return createRegOperand(TMA_LO);
+  case 111: return createRegOperand(TMA_HI);
   case 124: return createRegOperand(M0);
   case 126: return createRegOperand(EXEC_LO);
   case 127: return createRegOperand(EXEC_HI);
@@ -790,7 +790,7 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg32(unsigned Val) const {
   case 236: return createRegOperand(SRC_SHARED_LIMIT);
   case 237: return createRegOperand(SRC_PRIVATE_BASE);
   case 238: return createRegOperand(SRC_PRIVATE_LIMIT);
-    // TODO: SRC_POPS_EXITING_WAVE_ID
+  case 239: return createRegOperand(SRC_POPS_EXITING_WAVE_ID);
     // ToDo: no support for vccz register
   case 251: break;
     // ToDo: no support for execz register
@@ -809,9 +809,14 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg64(unsigned Val) const {
   case 102: return createRegOperand(FLAT_SCR);
   case 104: return createRegOperand(XNACK_MASK);
   case 106: return createRegOperand(VCC);
-  case 108: assert(!isGFX9()); return createRegOperand(TBA);
-  case 110: assert(!isGFX9()); return createRegOperand(TMA);
+  case 108: return createRegOperand(TBA);
+  case 110: return createRegOperand(TMA);
   case 126: return createRegOperand(EXEC);
+  case 235: return createRegOperand(SRC_SHARED_BASE);
+  case 236: return createRegOperand(SRC_SHARED_LIMIT);
+  case 237: return createRegOperand(SRC_PRIVATE_BASE);
+  case 238: return createRegOperand(SRC_PRIVATE_LIMIT);
+  case 239: return createRegOperand(SRC_POPS_EXITING_WAVE_ID);
   default: break;
   }
   return errOperand(Val, "unknown operand encoding " + Twine(Val));
@@ -823,9 +828,9 @@ MCOperand AMDGPUDisassembler::decodeSDWASrc(const OpWidthTy Width,
   using namespace AMDGPU::EncValues;
 
   if (STI.getFeatureBits()[AMDGPU::FeatureGFX9]) {
-    // XXX: static_cast<int> is needed to avoid stupid warning:
+    // XXX: cast to int is needed to avoid stupid warning:
     // compare with unsigned is always true
-    if (SDWA9EncValues::SRC_VGPR_MIN <= static_cast<int>(Val) &&
+    if (int(SDWA9EncValues::SRC_VGPR_MIN) <= int(Val) &&
         Val <= SDWA9EncValues::SRC_VGPR_MAX) {
       return createRegOperand(getVgprClassId(Width),
                               Val - SDWA9EncValues::SRC_VGPR_MIN);
