@@ -590,6 +590,9 @@ namespace llvm {
       // Load, scalar_to_vector, and zero extend.
       VZEXT_LOAD,
 
+      // extract_vector_elt, store.
+      VEXTRACT_STORE,
+
       // Store FP control world into i16 memory.
       FNSTCW16m,
 
@@ -813,6 +816,9 @@ namespace llvm {
     bool hasAndNotCompare(SDValue Y) const override;
 
     bool hasAndNot(SDValue Y) const override;
+
+    bool shouldFoldConstantShiftPairToMask(const SDNode *N,
+                                           CombineLevel Level) const override;
 
     bool shouldFoldMaskToVariableShiftPair(SDValue Y) const override;
 
