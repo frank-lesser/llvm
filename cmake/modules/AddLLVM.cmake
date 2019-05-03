@@ -21,6 +21,10 @@ function(llvm_update_compile_flags name)
   else()
     if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
       list(APPEND LLVM_COMPILE_FLAGS "-fno-exceptions")
+      if(NOT LLVM_ENABLE_UNWIND_TABLES)
+        list(APPEND LLVM_COMPILE_FLAGS "-fno-unwind-tables")
+        list(APPEND LLVM_COMPILE_FLAGS "-fno-asynchronous-unwind-tables")
+      endif()
     elseif(MSVC)
       list(APPEND LLVM_COMPILE_DEFINITIONS _HAS_EXCEPTIONS=0)
       list(APPEND LLVM_COMPILE_FLAGS "/EHs-c-")
@@ -878,6 +882,7 @@ if(NOT LLVM_TOOLCHAIN_TOOLS)
     llvm-lib
     llvm-objdump
     llvm-rc
+    llvm-profdata
     )
 endif()
 
