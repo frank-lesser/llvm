@@ -1792,8 +1792,9 @@ SDValue DAGCombiner::visitTokenFactor(SDNode *N) {
   TFs.push_back(N);
 
   // Iterate through token factors.  The TFs grows when new token factors are
-  // encountered.
-  for (unsigned i = 0; i < TFs.size(); ++i) {
+  // encountered. Limit number of nodes to inline, to avoid quadratic compile
+  // times.
+  for (unsigned i = 0; i < TFs.size() && Ops.size() <= 2048; ++i) {
     SDNode *TF = TFs[i];
 
     // Check each of the operands.
@@ -6119,6 +6120,38 @@ calculateByteProvider(SDValue Op, unsigned Index, unsigned Depth,
   return None;
 }
 
+static unsigned LittleEndianByteAt(unsigned BW, unsigned i) {
+  return i;
+}
+
+static unsigned BigEndianByteAt(unsigned BW, unsigned i) {
+  return BW - i - 1;
+}
+
+// Check if the bytes offsets we are looking at match with either big or
+// little endian value loaded. Return true for big endian, false for little 
+// endian, and None if match failed.
+static Optional<bool> isBigEndian(const SmallVector<int64_t, 4> &ByteOffsets,
+                                  int64_t FirstOffset) {
+  // The endian can be decided only when it is 2 bytes at least.
+  unsigned Width = ByteOffsets.size();
+  if (Width < 2)
+    return None;
+
+  bool BigEndian = true, LittleEndian = true;
+  for (unsigned i = 0; i < Width; i++) {
+    int64_t CurrentByteOffset = ByteOffsets[i] - FirstOffset;
+    LittleEndian &= CurrentByteOffset == LittleEndianByteAt(Width, i);
+    BigEndian &= CurrentByteOffset == BigEndianByteAt(Width, i);
+    if (!BigEndian && !LittleEndian)
+      return None;
+  }
+
+  assert((BigEndian != LittleEndian) && "It should be either big endian or"
+                                        "little endian");
+  return BigEndian;
+}
+
 /// Match a pattern where a wide type scalar value is loaded by several narrow
 /// loads and combined by shifts and ors. Fold it into a single load or a load
 /// and a BSWAP if the targets supports it.
@@ -6165,11 +6198,6 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
   // patterns to a couple of i32 loads on 32 bit targets.
   if (LegalOperations && !TLI.isOperationLegal(ISD::LOAD, VT))
     return SDValue();
-
-  std::function<unsigned(unsigned, unsigned)> LittleEndianByteAt = [](
-    unsigned BW, unsigned i) { return i; };
-  std::function<unsigned(unsigned, unsigned)> BigEndianByteAt = [](
-    unsigned BW, unsigned i) { return BW - i - 1; };
 
   bool IsBigEndianTarget = DAG.getDataLayout().isBigEndian();
   auto MemoryByteOffset = [&] (ByteProvider P) {
@@ -6237,15 +6265,10 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
 
   // Check if the bytes of the OR we are looking at match with either big or
   // little endian value load
-  bool BigEndian = true, LittleEndian = true;
-  for (unsigned i = 0; i < ByteWidth; i++) {
-    int64_t CurrentByteOffset = ByteOffsets[i] - FirstOffset;
-    LittleEndian &= CurrentByteOffset == LittleEndianByteAt(ByteWidth, i);
-    BigEndian &= CurrentByteOffset == BigEndianByteAt(ByteWidth, i);
-    if (!BigEndian && !LittleEndian)
-      return SDValue();
-  }
-  assert((BigEndian != LittleEndian) && "should be either or");
+  Optional<bool> IsBigEndian = isBigEndian(ByteOffsets, FirstOffset);
+  if (!IsBigEndian.hasValue())
+    return SDValue();
+
   assert(FirstByteProvider && "must be set");
 
   // Ensure that the first byte is loaded from zero offset of the first load.
@@ -6258,7 +6281,7 @@ SDValue DAGCombiner::MatchLoadCombine(SDNode *N) {
   // replace it with a single load and bswap if needed.
 
   // If the load needs byte swap check if the target supports it
-  bool NeedsBswap = IsBigEndianTarget != BigEndian;
+  bool NeedsBswap = IsBigEndianTarget != *IsBigEndian;
 
   // Before legalize we can introduce illegal bswaps which will be later
   // converted to an explicit bswap sequence. This way we end up with a single
@@ -18670,6 +18693,7 @@ SDValue DAGCombiner::visitFP16_TO_FP(SDNode *N) {
 SDValue DAGCombiner::visitVECREDUCE(SDNode *N) {
   SDValue N0 = N->getOperand(0);
   EVT VT = N0.getValueType();
+  unsigned Opcode = N->getOpcode();
 
   // VECREDUCE over 1-element vector is just an extract.
   if (VT.getVectorNumElements() == 1) {
@@ -18680,6 +18704,17 @@ SDValue DAGCombiner::visitVECREDUCE(SDNode *N) {
     if (Res.getValueType() != N->getValueType(0))
       Res = DAG.getNode(ISD::ANY_EXTEND, dl, N->getValueType(0), Res);
     return Res;
+  }
+
+  // On an boolean vector an and/or reduction is the same as a umin/umax
+  // reduction. Convert them if the latter is legal while the former isn't.
+  if (Opcode == ISD::VECREDUCE_AND || Opcode == ISD::VECREDUCE_OR) {
+    unsigned NewOpcode = Opcode == ISD::VECREDUCE_AND
+        ? ISD::VECREDUCE_UMIN : ISD::VECREDUCE_UMAX;
+    if (!TLI.isOperationLegalOrCustom(Opcode, VT) &&
+        TLI.isOperationLegalOrCustom(NewOpcode, VT) &&
+        DAG.ComputeNumSignBits(N0) == VT.getScalarSizeInBits())
+      return DAG.getNode(NewOpcode, SDLoc(N), N->getValueType(0), N0);
   }
 
   return SDValue();
@@ -18996,6 +19031,10 @@ bool DAGCombiner::SimplifySelectOps(SDNode *TheSelect, SDValue LHS,
         // locations are not in the default address space.
         LLD->getPointerInfo().getAddrSpace() != 0 ||
         RLD->getPointerInfo().getAddrSpace() != 0 ||
+        // We can't produce a CMOV of a TargetFrameIndex since we won't
+        // generate the address generation required.
+        LLD->getBasePtr().getOpcode() == ISD::TargetFrameIndex ||
+        RLD->getBasePtr().getOpcode() == ISD::TargetFrameIndex ||
         !TLI.isOperationLegalOrCustom(TheSelect->getOpcode(),
                                       LLD->getBasePtr().getValueType()))
       return false;

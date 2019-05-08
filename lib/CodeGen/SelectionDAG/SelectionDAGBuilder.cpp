@@ -215,8 +215,8 @@ static SDValue getCopyFromParts(SelectionDAG &DAG, const SDLoc &DL,
       unsigned ValueBits = ValueVT.getSizeInBits();
 
       // Assemble the power of 2 part.
-      unsigned RoundParts = NumParts & (NumParts - 1) ?
-        1 << Log2_32(NumParts) : NumParts;
+      unsigned RoundParts =
+          (NumParts & (NumParts - 1)) ? 1 << Log2_32(NumParts) : NumParts;
       unsigned RoundBits = PartBits * RoundParts;
       EVT RoundVT = RoundBits == ValueBits ?
         ValueVT : EVT::getIntegerVT(*DAG.getContext(), RoundBits);
@@ -322,7 +322,15 @@ static SDValue getCopyFromParts(SelectionDAG &DAG, const SDLoc &DL,
     return DAG.getNode(ISD::FP_EXTEND, DL, ValueVT, Val);
   }
 
-  llvm_unreachable("Unknown mismatch!");
+  // Handle MMX to a narrower integer type by bitcasting MMX to integer and
+  // then truncating.
+  if (PartEVT == MVT::x86mmx && ValueVT.isInteger() &&
+      ValueVT.bitsLT(PartEVT)) {
+    Val = DAG.getNode(ISD::BITCAST, DL, MVT::i64, Val);
+    return DAG.getNode(ISD::TRUNCATE, DL, ValueVT, Val);
+  }
+
+  report_fatal_error("Unknown mismatch in getCopyFromParts!");
 }
 
 static void diagnosePossiblyInvalidConstraint(LLVMContext &Ctx, const Value *V,
@@ -8850,8 +8858,11 @@ TargetLowering::LowerCallTo(TargetLowering::CallLoweringInfo &CLI) const {
 
   if (CLI.IsPostTypeLegalization) {
     // If we are lowering a libcall after legalization, split the return type.
-    SmallVector<EVT, 4> OldRetTys = std::move(RetTys);
-    SmallVector<uint64_t, 4> OldOffsets = std::move(Offsets);
+    SmallVector<EVT, 4> OldRetTys;
+    SmallVector<uint64_t, 4> OldOffsets;
+    RetTys.swap(OldRetTys);
+    Offsets.swap(OldOffsets);
+
     for (size_t i = 0, e = OldRetTys.size(); i != e; ++i) {
       EVT RetVT = OldRetTys[i];
       uint64_t Offset = OldOffsets[i];
