@@ -89,6 +89,7 @@ intermediate LLVM representation.
    GetElementPtr
    Frontend/PerformanceTips
    MCJITDesignAndImplementation
+   ORCv2DesignAndImplementation
    CodeOfConduct
    CompileCudaWithLLVM
    ReportingGuide
@@ -374,6 +375,10 @@ For API clients and LLVM developers.
 :doc:`MCJITDesignAndImplementation`
    Describes the inner workings of MCJIT execution engine.
 
+:doc:`ORCv2DesignAndImplementation`
+   Describes the design and implementation of the ORC APIs, including some
+   usage examples.
+
 :doc:`BranchWeightMetadata`
    Provides information about Branch Prediction Information.
 
@@ -564,6 +569,21 @@ This channel has several bots.
 
 * clang-bot - A `geordi <http://www.eelis.net/geordi/>`_ instance running
   near-trunk clang instead of gcc.
+
+Meetups and social events
+-------------------------
+
+.. toctree::
+   :hidden:
+
+   MeetupGuidelines
+
+Besides developer `meetings and conferences <https://llvm.org/devmtg/>`_,
+there are several user groups called
+`LLVM Socials <https://www.meetup.com/pro/llvm/>`_. We greatly encourage you to
+join one in your city. Or start a new one if there is none:
+
+:doc:`MeetupGuidelines`
 
 Community wide proposals
 ------------------------

@@ -710,6 +710,8 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::FRINT,      VT, Expand);
     setOperationAction(ISD::FTRUNC,     VT, Expand);
     setOperationAction(ISD::FROUND,     VT, Expand);
+    setOperationAction(ISD::LROUND,     VT, Expand);
+    setOperationAction(ISD::LLROUND,    VT, Expand);
   }
 
   // Default ISD::TRAP to expand (which turns it into abort).
@@ -722,7 +724,7 @@ void TargetLoweringBase::initActions() {
 
 MVT TargetLoweringBase::getScalarShiftAmountTy(const DataLayout &DL,
                                                EVT) const {
-  return MVT::getIntegerVT(8 * DL.getPointerSize(0));
+  return MVT::getIntegerVT(DL.getPointerSizeInBits(0));
 }
 
 EVT TargetLoweringBase::getShiftAmountTy(EVT LHSTy, const DataLayout &DL,

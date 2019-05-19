@@ -4717,7 +4717,10 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
                             MemVT.getStoreSize(), I.getAlignment(), AAMDNodes(),
                             nullptr, SSID, Ordering);
 
-  SDValue Val = DAG.getPtrExtOrTrunc(getValue(I.getValueOperand()), dl, MemVT);
+  SDValue Val = getValue(I.getValueOperand());
+  if (Val.getValueType() != MemVT)
+    Val = DAG.getPtrExtOrTrunc(Val, dl, MemVT);
+
   SDValue OutChain = DAG.getAtomic(ISD::ATOMIC_STORE, dl, MemVT, InChain,
                                    getValue(I.getPointerOperand()), Val, MMO);
 
@@ -6022,6 +6025,22 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
                              getValue(I.getArgOperand(0))));
     return nullptr;
   }
+  case Intrinsic::lround_i32:
+  case Intrinsic::lround_i64:
+  case Intrinsic::llround: {
+    unsigned Opcode;
+    MVT RetVT;
+    switch (Intrinsic) {
+    default: llvm_unreachable("Impossible intrinsic");  // Can't reach here.
+    case Intrinsic::lround_i32: Opcode = ISD::LROUND;  RetVT = MVT::i32; break;
+    case Intrinsic::lround_i64: Opcode = ISD::LROUND;  RetVT = MVT::i64; break;
+    case Intrinsic::llround:    Opcode = ISD::LLROUND; RetVT = MVT::i64; break;
+    }
+
+    setValue(&I, DAG.getNode(Opcode, sdl, RetVT,
+                             getValue(I.getArgOperand(0))));
+    return nullptr;
+  }
   case Intrinsic::minnum: {
     auto VT = getValue(I.getArgOperand(0)).getValueType();
     unsigned Opc =
@@ -6075,6 +6094,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   case Intrinsic::experimental_constrained_fdiv:
   case Intrinsic::experimental_constrained_frem:
   case Intrinsic::experimental_constrained_fma:
+  case Intrinsic::experimental_constrained_fptrunc:
+  case Intrinsic::experimental_constrained_fpext:
   case Intrinsic::experimental_constrained_sqrt:
   case Intrinsic::experimental_constrained_pow:
   case Intrinsic::experimental_constrained_powi:
@@ -6831,6 +6852,12 @@ void SelectionDAGBuilder::visitConstrainedFPIntrinsic(
   case Intrinsic::experimental_constrained_fma:
     Opcode = ISD::STRICT_FMA;
     break;
+  case Intrinsic::experimental_constrained_fptrunc:
+    Opcode = ISD::STRICT_FP_ROUND;
+    break;
+  case Intrinsic::experimental_constrained_fpext:
+    Opcode = ISD::STRICT_FP_EXTEND;
+    break;
   case Intrinsic::experimental_constrained_sqrt:
     Opcode = ISD::STRICT_FSQRT;
     break;
@@ -6894,7 +6921,12 @@ void SelectionDAGBuilder::visitConstrainedFPIntrinsic(
 
   SDVTList VTs = DAG.getVTList(ValueVTs);
   SDValue Result;
-  if (FPI.isUnaryOp())
+  if (Opcode == ISD::STRICT_FP_ROUND)
+    Result = DAG.getNode(Opcode, sdl, VTs, 
+                          { Chain, getValue(FPI.getArgOperand(0)), 
+                               DAG.getTargetConstant(0, sdl,
+                               TLI.getPointerTy(DAG.getDataLayout())) });
+  else if (FPI.isUnaryOp())
     Result = DAG.getNode(Opcode, sdl, VTs,
                          { Chain, getValue(FPI.getArgOperand(0)) });
   else if (FPI.isTernaryOp())

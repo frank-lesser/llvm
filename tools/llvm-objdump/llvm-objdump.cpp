@@ -1126,9 +1126,8 @@ static void disassembleObject(const Target *TheTarget, const ObjectFile *Obj,
     SmallString<40> Comments;
     raw_svector_ostream CommentStream(Comments);
 
-    StringRef BytesStr;
-    error(Section.getContents(BytesStr));
-    ArrayRef<uint8_t> Bytes = arrayRefFromStringRef(BytesStr);
+    ArrayRef<uint8_t> Bytes = arrayRefFromStringRef(
+        unwrapOrError(Section.getContents(), Obj->getFileName()));
 
     uint64_t VMAAdjustment = 0;
     if (shouldAdjustVA(Section))
@@ -1561,7 +1560,6 @@ void printSectionHeaders(const ObjectFile *Obj) {
 void printSectionContents(const ObjectFile *Obj) {
   for (const SectionRef &Section : ToolSectionFilter(*Obj)) {
     StringRef Name;
-    StringRef Contents;
     error(Section.getName(Name));
     uint64_t BaseAddr = Section.getAddress();
     uint64_t Size = Section.getSize();
@@ -1576,7 +1574,7 @@ void printSectionContents(const ObjectFile *Obj) {
       continue;
     }
 
-    error(Section.getContents(Contents));
+    StringRef Contents = unwrapOrError(Section.getContents(), Obj->getFileName());
 
     // Dump out the content as hex and printable ascii characters.
     for (std::size_t Addr = 0, End = Contents.size(); Addr < End; Addr += 16) {
@@ -1686,20 +1684,38 @@ void printSymbolTable(const ObjectFile *O, StringRef ArchiveName,
       outs() << SectionName;
     }
 
-    outs() << '\t';
     if (Common || isa<ELFObjectFileBase>(O)) {
       uint64_t Val =
           Common ? Symbol.getAlignment() : ELFSymbolRef(Symbol).getSize();
-      outs() << format("\t %08" PRIx64 " ", Val);
+      outs() << format("\t%08" PRIx64, Val);
     }
 
-    if (Hidden)
-      outs() << ".hidden ";
+    if (isa<ELFObjectFileBase>(O)) {
+      uint8_t Other = ELFSymbolRef(Symbol).getOther();
+      switch (Other) {
+      case ELF::STV_DEFAULT:
+        break;
+      case ELF::STV_INTERNAL:
+        outs() << " .internal";
+        break;
+      case ELF::STV_HIDDEN:
+        outs() << " .hidden";
+        break;
+      case ELF::STV_PROTECTED:
+        outs() << " .protected";
+        break;
+      default:
+        outs() << format(" 0x%02x", Other);
+        break;
+      }
+    } else if (Hidden) {
+      outs() << " .hidden";
+    }
 
     if (Demangle)
-      outs() << demangle(Name) << '\n';
+      outs() << ' ' << demangle(Name) << '\n';
     else
-      outs() << Name << '\n';
+      outs() << ' ' << Name << '\n';
   }
 }
 
@@ -1746,8 +1762,8 @@ void printRawClangAST(const ObjectFile *Obj) {
   if (!ClangASTSection)
     return;
 
-  StringRef ClangASTContents;
-  error(ClangASTSection.getValue().getContents(ClangASTContents));
+  StringRef ClangASTContents = unwrapOrError(
+      ClangASTSection.getValue().getContents(), Obj->getFileName());
   outs().write(ClangASTContents.data(), ClangASTContents.size());
 }
 
@@ -1783,9 +1799,8 @@ static void printFaultMaps(const ObjectFile *Obj) {
     return;
   }
 
-  StringRef FaultMapContents;
-  error(FaultMapSection.getValue().getContents(FaultMapContents));
-
+  StringRef FaultMapContents =
+      unwrapOrError(FaultMapSection.getValue().getContents(), Obj->getFileName());
   FaultMapParser FMP(FaultMapContents.bytes_begin(),
                      FaultMapContents.bytes_end());
 
