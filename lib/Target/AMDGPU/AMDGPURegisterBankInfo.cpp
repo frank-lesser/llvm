@@ -160,7 +160,7 @@ AMDGPURegisterBankInfo::getInstrAlternativeMappingsIntrinsicWSideEffects(
     };
 
     // rsrc, voffset, offset
-    const std::array<unsigned, 3> RegSrcOpIdx = { 2, 3, 4 };
+    const std::array<unsigned, 3> RegSrcOpIdx = { { 2, 3, 4 } };
     return addMappingFromTable<3>(MI, MRI, RegSrcOpIdx, makeArrayRef(Table));
   }
   case Intrinsic::amdgcn_s_buffer_load: {
@@ -179,7 +179,7 @@ AMDGPURegisterBankInfo::getInstrAlternativeMappingsIntrinsicWSideEffects(
     };
 
     // rsrc, offset
-    const std::array<unsigned, 2> RegSrcOpIdx = { 2, 3 };
+    const std::array<unsigned, 2> RegSrcOpIdx = { { 2, 3 } };
     return addMappingFromTable<2>(MI, MRI, RegSrcOpIdx, makeArrayRef(Table));
   }
   default:
@@ -1054,6 +1054,13 @@ AMDGPURegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
     if (isSALUMapping(MI))
       return getDefaultMappingSOP(MI);
     LLVM_FALLTHROUGH;
+
+  case AMDGPU::G_SMIN:
+  case AMDGPU::G_SMAX:
+  case AMDGPU::G_UMIN:
+  case AMDGPU::G_UMAX:
+    // TODO: min/max can be scalar, but requires expanding as a compare and
+    // select.
 
   case AMDGPU::G_FADD:
   case AMDGPU::G_FSUB:

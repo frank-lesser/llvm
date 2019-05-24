@@ -1042,6 +1042,13 @@ SDValue DAGCombiner::reassociateOps(unsigned Opc, const SDLoc &DL, SDValue N0,
   // Don't reassociate reductions.
   if (Flags.hasVectorReduction())
     return SDValue();
+
+  // Floating-point reassociation is not allowed without loose FP math.
+  if (N0.getValueType().isFloatingPoint() ||
+      N1.getValueType().isFloatingPoint())
+    if (!Flags.hasAllowReassociation() || !Flags.hasNoSignedZeros())
+      return SDValue();
+
   if (SDValue Combined = reassociateOpsCommutative(Opc, DL, N0, N1))
     return Combined;
   if (SDValue Combined = reassociateOpsCommutative(Opc, DL, N1, N0))
@@ -1728,7 +1735,7 @@ SDValue DAGCombiner::combine(SDNode *N) {
     }
   }
 
-  // If N is a commutative binary node, try eliminate it if the commuted
+  // If N is a commutative binary node, try to eliminate it if the commuted
   // version is already present in the DAG.
   if (!RV.getNode() && TLI.isCommutativeBinOp(N->getOpcode()) &&
       N->getNumValues() == 1) {
@@ -1961,7 +1968,8 @@ static ConstantSDNode *getAsNonOpaqueConstant(SDValue N) {
 }
 
 SDValue DAGCombiner::foldBinOpIntoSelect(SDNode *BO) {
-  assert(TLI.isBinOp(BO->getOpcode()) && "Unexpected binary operator");
+  assert(TLI.isBinOp(BO->getOpcode()) && BO->getNumValues() == 1 &&
+         "Unexpected binary operator");
 
   // Don't do this unless the old select is going away. We want to eliminate the
   // binary operator, not replace a binop with a select.
@@ -6618,19 +6626,20 @@ SDValue DAGCombiner::visitShiftByConstant(SDNode *N, ConstantSDNode *Amt) {
     return SDValue();
 
   // FIXME: disable this unless the input to the binop is a shift by a constant
-  // or is copy/select.Enable this in other cases when figure out it's exactly profitable.
-  SDNode *BinOpLHSVal = LHS->getOperand(0).getNode();
-  bool isShift = BinOpLHSVal->getOpcode() == ISD::SHL ||
-                 BinOpLHSVal->getOpcode() == ISD::SRA ||
-                 BinOpLHSVal->getOpcode() == ISD::SRL;
-  bool isCopyOrSelect = BinOpLHSVal->getOpcode() == ISD::CopyFromReg ||
-                        BinOpLHSVal->getOpcode() == ISD::SELECT;
+  // or is copy/select. Enable this in other cases when figure out it's exactly
+  // profitable.
+  SDValue BinOpLHSVal = LHS->getOperand(0);
+  bool IsShiftByConstant = (BinOpLHSVal.getOpcode() == ISD::SHL ||
+                            BinOpLHSVal.getOpcode() == ISD::SRA ||
+                            BinOpLHSVal.getOpcode() == ISD::SRL) &&
+                           isa<ConstantSDNode>(BinOpLHSVal.getOperand(1));
+  bool IsCopyOrSelect = BinOpLHSVal.getOpcode() == ISD::CopyFromReg ||
+                        BinOpLHSVal.getOpcode() == ISD::SELECT;
 
-  if ((!isShift || !isa<ConstantSDNode>(BinOpLHSVal->getOperand(1))) &&
-      !isCopyOrSelect)
+  if (!IsShiftByConstant && !IsCopyOrSelect)
     return SDValue();
 
-  if (isCopyOrSelect && N->hasOneUse())
+  if (IsCopyOrSelect && N->hasOneUse())
     return SDValue();
 
   EVT VT = N->getValueType(0);
@@ -16164,7 +16173,8 @@ static SDValue scalarizeExtractedBinop(SDNode *ExtElt, SelectionDAG &DAG,
   SDValue Vec = ExtElt->getOperand(0);
   SDValue Index = ExtElt->getOperand(1);
   auto *IndexC = dyn_cast<ConstantSDNode>(Index);
-  if (!IndexC || !TLI.isBinOp(Vec.getOpcode()) || !Vec.hasOneUse())
+  if (!IndexC || !TLI.isBinOp(Vec.getOpcode()) || !Vec.hasOneUse() ||
+      Vec.getNode()->getNumValues() != 1)
     return SDValue();
 
   // Targets may want to avoid this to prevent an expensive register transfer.
@@ -17404,7 +17414,7 @@ static SDValue narrowInsertExtractVectorBinOp(SDNode *Extract,
                                               SelectionDAG &DAG) {
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   SDValue BinOp = Extract->getOperand(0);
-  if (!TLI.isBinOp(BinOp.getOpcode()))
+  if (!TLI.isBinOp(BinOp.getOpcode()) || BinOp.getNode()->getNumValues() != 1)
     return SDValue();
 
   SDValue Bop0 = BinOp.getOperand(0), Bop1 = BinOp.getOperand(1);
@@ -17448,7 +17458,7 @@ static SDValue narrowExtractedVectorBinOp(SDNode *Extract, SelectionDAG &DAG) {
   // feeding an extract subvector.
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   SDValue BinOp = peekThroughBitcasts(Extract->getOperand(0));
-  if (!TLI.isBinOp(BinOp.getOpcode()))
+  if (!TLI.isBinOp(BinOp.getOpcode()) || BinOp.getNode()->getNumValues() != 1)
     return SDValue();
 
   // The binop must be a vector type, so we can extract some fraction of it.
@@ -18260,7 +18270,7 @@ SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   if (SVN->isSplat() && SVN->getSplatIndex() < (int)NumElts) {
     int SplatIndex = SVN->getSplatIndex();
     if (TLI.isExtractVecEltCheap(VT, SplatIndex) &&
-        TLI.isBinOp(N0.getOpcode())) {
+        TLI.isBinOp(N0.getOpcode()) && N0.getNode()->getNumValues() == 1) {
       // splat (vector_bo L, R), Index -->
       // splat (scalar_bo (extelt L, Index), (extelt R, Index))
       SDValue L = N0.getOperand(0), R = N0.getOperand(1);
