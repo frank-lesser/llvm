@@ -589,6 +589,9 @@ namespace llvm {
       // User level wait
       UMWAIT, TPAUSE,
 
+      // Enqueue Stores Instructions
+      ENQCMD, ENQCMDS,
+
       // Compare and swap.
       LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LCMPXCHG8_DAG,
@@ -907,6 +910,8 @@ namespace llvm {
                                            KnownBits &Known,
                                            TargetLoweringOpt &TLO,
                                            unsigned Depth) const override;
+
+    const Constant *getTargetConstantFromLoad(LoadSDNode *LD) const override;
 
     SDValue unwrapAddress(SDValue N) const override;
 
