@@ -771,18 +771,20 @@ static char isNegatibleForFree(SDValue Op, bool LegalOperations,
                                bool ForCodeSize,
                                unsigned Depth = 0) {
   // fneg is removable even if it has multiple uses.
-  if (Op.getOpcode() == ISD::FNEG) return 2;
+  if (Op.getOpcode() == ISD::FNEG)
+    return 2;
 
   // Don't allow anything with multiple uses unless we know it is free.
   EVT VT = Op.getValueType();
   const SDNodeFlags Flags = Op->getFlags();
-  if (!Op.hasOneUse())
-    if (!(Op.getOpcode() == ISD::FP_EXTEND &&
-          TLI.isFPExtFree(VT, Op.getOperand(0).getValueType())))
-      return 0;
+  if (!Op.hasOneUse() &&
+      !(Op.getOpcode() == ISD::FP_EXTEND &&
+        TLI.isFPExtFree(VT, Op.getOperand(0).getValueType())))
+    return 0;
 
   // Don't recurse exponentially.
-  if (Depth > 6) return 0;
+  if (Depth > 6)
+    return 0;
 
   switch (Op.getOpcode()) {
   default: return false;
@@ -793,8 +795,8 @@ static char isNegatibleForFree(SDValue Op, bool LegalOperations,
     // Don't invert constant FP values after legalization unless the target says
     // the negated constant is legal.
     return TLI.isOperationLegal(ISD::ConstantFP, VT) ||
-      TLI.isFPImmLegal(neg(cast<ConstantFPSDNode>(Op)->getValueAPF()), VT,
-                       ForCodeSize);
+           TLI.isFPImmLegal(neg(cast<ConstantFPSDNode>(Op)->getValueAPF()), VT,
+                            ForCodeSize);
   }
   case ISD::FADD:
     if (!Options->UnsafeFPMath && !Flags.hasNoSignedZeros())
@@ -813,8 +815,7 @@ static char isNegatibleForFree(SDValue Op, bool LegalOperations,
                               ForCodeSize, Depth + 1);
   case ISD::FSUB:
     // We can't turn -(A-B) into B-A when we honor signed zeros.
-    if (!Options->NoSignedZerosFPMath &&
-        !Flags.hasNoSignedZeros())
+    if (!Options->NoSignedZerosFPMath && !Flags.hasNoSignedZeros())
       return 0;
 
     // fold (fneg (fsub A, B)) -> (fsub B, A)
@@ -842,13 +843,13 @@ static char isNegatibleForFree(SDValue Op, bool LegalOperations,
 static SDValue GetNegatedExpression(SDValue Op, SelectionDAG &DAG,
                                     bool LegalOperations, bool ForCodeSize,
                                     unsigned Depth = 0) {
-  const TargetOptions &Options = DAG.getTarget().Options;
   // fneg is removable even if it has multiple uses.
-  if (Op.getOpcode() == ISD::FNEG) return Op.getOperand(0);
+  if (Op.getOpcode() == ISD::FNEG)
+    return Op.getOperand(0);
 
   assert(Depth <= 6 && "GetNegatedExpression doesn't match isNegatibleForFree");
-
-  const SDNodeFlags Flags = Op.getNode()->getFlags();
+  const TargetOptions &Options = DAG.getTarget().Options;
+  const SDNodeFlags Flags = Op->getFlags();
 
   switch (Op.getOpcode()) {
   default: llvm_unreachable("Unknown code");
@@ -877,7 +878,7 @@ static SDValue GetNegatedExpression(SDValue Op, SelectionDAG &DAG,
                        Op.getOperand(0), Flags);
   case ISD::FSUB:
     // fold (fneg (fsub 0, B)) -> B
-    if (ConstantFPSDNode *N0CFP = dyn_cast<ConstantFPSDNode>(Op.getOperand(0)))
+    if (auto *N0CFP = dyn_cast<ConstantFPSDNode>(Op.getOperand(0)))
       if (N0CFP->isZero())
         return Op.getOperand(1);
 
@@ -911,11 +912,11 @@ static SDValue GetNegatedExpression(SDValue Op, SelectionDAG &DAG,
                                             LegalOperations, ForCodeSize,
                                             Depth+1));
   case ISD::FP_ROUND:
-      return DAG.getNode(ISD::FP_ROUND, SDLoc(Op), Op.getValueType(),
-                         GetNegatedExpression(Op.getOperand(0), DAG,
-                                              LegalOperations, ForCodeSize,
-                                              Depth+1),
-                         Op.getOperand(1));
+    return DAG.getNode(ISD::FP_ROUND, SDLoc(Op), Op.getValueType(),
+                       GetNegatedExpression(Op.getOperand(0), DAG,
+                                            LegalOperations, ForCodeSize,
+                                            Depth+1),
+                       Op.getOperand(1));
   }
 }
 
@@ -4990,24 +4991,22 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
         // the first vector value and FF for the rest, repeating. We need a mask
         // that will apply equally to all members of the vector, so AND all the
         // lanes of the constant together.
-        EVT VT = Vector->getValueType(0);
-        unsigned BitWidth = VT.getScalarSizeInBits();
+        unsigned EltBitWidth = Vector->getValueType(0).getScalarSizeInBits();
 
         // If the splat value has been compressed to a bitlength lower
         // than the size of the vector lane, we need to re-expand it to
         // the lane size.
-        if (BitWidth > SplatBitSize)
-          for (SplatValue = SplatValue.zextOrTrunc(BitWidth);
-               SplatBitSize < BitWidth;
-               SplatBitSize = SplatBitSize * 2)
+        if (EltBitWidth > SplatBitSize)
+          for (SplatValue = SplatValue.zextOrTrunc(EltBitWidth);
+               SplatBitSize < EltBitWidth; SplatBitSize = SplatBitSize * 2)
             SplatValue |= SplatValue.shl(SplatBitSize);
 
         // Make sure that variable 'Constant' is only set if 'SplatBitSize' is a
         // multiple of 'BitWidth'. Otherwise, we could propagate a wrong value.
-        if (SplatBitSize % BitWidth == 0) {
-          Constant = APInt::getAllOnesValue(BitWidth);
-          for (unsigned i = 0, n = SplatBitSize/BitWidth; i < n; ++i)
-            Constant &= SplatValue.lshr(i*BitWidth).zextOrTrunc(BitWidth);
+        if ((SplatBitSize % EltBitWidth) == 0) {
+          Constant = APInt::getAllOnesValue(EltBitWidth);
+          for (unsigned i = 0, n = (SplatBitSize / EltBitWidth); i < n; ++i)
+            Constant &= SplatValue.extractBits(EltBitWidth, i * EltBitWidth);
         }
       }
     }
@@ -5124,17 +5123,18 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
     EVT MemVT = LN0->getMemoryVT();
     // If we zero all the possible extended bits, then we can turn this into
     // a zextload if we are running before legalize or the operation is legal.
-    unsigned BitWidth = N1.getScalarValueSizeInBits();
-    if (DAG.MaskedValueIsZero(N1, APInt::getHighBitsSet(BitWidth,
-                           BitWidth - MemVT.getScalarSizeInBits())) &&
+    unsigned ExtBitSize = N1.getScalarValueSizeInBits();
+    unsigned MemBitSize = MemVT.getScalarSizeInBits();
+    APInt ExtBits = APInt::getHighBitsSet(ExtBitSize, ExtBitSize - MemBitSize);
+    if (DAG.MaskedValueIsZero(N1, ExtBits) &&
         ((!LegalOperations && !LN0->isVolatile()) ||
          TLI.isLoadExtLegal(ISD::ZEXTLOAD, VT, MemVT))) {
-      SDValue ExtLoad = DAG.getExtLoad(ISD::ZEXTLOAD, SDLoc(N0), VT,
-                                       LN0->getChain(), LN0->getBasePtr(),
-                                       MemVT, LN0->getMemOperand());
+      SDValue ExtLoad =
+          DAG.getExtLoad(ISD::ZEXTLOAD, SDLoc(N0), VT, LN0->getChain(),
+                         LN0->getBasePtr(), MemVT, LN0->getMemOperand());
       AddToWorklist(N);
       CombineTo(N0.getNode(), ExtLoad, ExtLoad.getValue(1));
-      return SDValue(N, 0);   // Return N so it doesn't get rechecked!
+      return SDValue(N, 0); // Return N so it doesn't get rechecked!
     }
   }
   // fold (zext_inreg (sextload x)) -> (zextload x) iff load has one use
@@ -5144,17 +5144,18 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
     EVT MemVT = LN0->getMemoryVT();
     // If we zero all the possible extended bits, then we can turn this into
     // a zextload if we are running before legalize or the operation is legal.
-    unsigned BitWidth = N1.getScalarValueSizeInBits();
-    if (DAG.MaskedValueIsZero(N1, APInt::getHighBitsSet(BitWidth,
-                           BitWidth - MemVT.getScalarSizeInBits())) &&
+    unsigned ExtBitSize = N1.getScalarValueSizeInBits();
+    unsigned MemBitSize = MemVT.getScalarSizeInBits();
+    APInt ExtBits = APInt::getHighBitsSet(ExtBitSize, ExtBitSize - MemBitSize);
+    if (DAG.MaskedValueIsZero(N1, ExtBits) &&
         ((!LegalOperations && !LN0->isVolatile()) ||
          TLI.isLoadExtLegal(ISD::ZEXTLOAD, VT, MemVT))) {
-      SDValue ExtLoad = DAG.getExtLoad(ISD::ZEXTLOAD, SDLoc(N0), VT,
-                                       LN0->getChain(), LN0->getBasePtr(),
-                                       MemVT, LN0->getMemOperand());
+      SDValue ExtLoad =
+          DAG.getExtLoad(ISD::ZEXTLOAD, SDLoc(N0), VT, LN0->getChain(),
+                         LN0->getBasePtr(), MemVT, LN0->getMemOperand());
       AddToWorklist(N);
       CombineTo(N0.getNode(), ExtLoad, ExtLoad.getValue(1));
-      return SDValue(N, 0);   // Return N so it doesn't get rechecked!
+      return SDValue(N, 0); // Return N so it doesn't get rechecked!
     }
   }
   // fold (and (or (srl N, 8), (shl N, 8)), 0xffff) -> (srl (bswap N), const)
@@ -14957,13 +14958,17 @@ void DAGCombiner::getStoreMergeCandidates(
     // Loads must only have one use.
     if (!Ld->hasNUsesOfValue(1, 0))
       return;
-    // The memory operands must not be volatile.
+    // The memory operands must not be volatile/indexed.
     if (Ld->isVolatile() || Ld->isIndexed())
       return;
   }
   auto CandidateMatch = [&](StoreSDNode *Other, BaseIndexOffset &Ptr,
                             int64_t &Offset) -> bool {
+    // The memory operands must not be volatile/indexed.
     if (Other->isVolatile() || Other->isIndexed())
+      return false;
+    // Don't mix temporal stores with non-temporal stores.
+    if (St->isNonTemporal() != Other->isNonTemporal())
       return false;
     SDValue OtherBC = peekThroughBitcasts(Other->getValue());
     // Allow merging constants of different types as integers.
@@ -14974,14 +14979,17 @@ void DAGCombiner::getStoreMergeCandidates(
         return false;
       // The Load's Base Ptr must also match
       if (LoadSDNode *OtherLd = dyn_cast<LoadSDNode>(OtherBC)) {
-        auto LPtr = BaseIndexOffset::match(OtherLd, DAG);
+        BaseIndexOffset LPtr = BaseIndexOffset::match(OtherLd, DAG);
         if (LoadVT != OtherLd->getMemoryVT())
           return false;
         // Loads must only have one use.
         if (!OtherLd->hasNUsesOfValue(1, 0))
           return false;
-        // The memory operands must not be volatile.
+        // The memory operands must not be volatile/indexed.
         if (OtherLd->isVolatile() || OtherLd->isIndexed())
+          return false;
+        // Don't mix temporal loads with non-temporal loads.
+        if (cast<LoadSDNode>(Val)->isNonTemporal() != OtherLd->isNonTemporal())
           return false;
         if (!(LBasePtr.equalBaseIndex(LPtr, DAG)))
           return false;
@@ -15139,6 +15147,9 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
                        isa<ConstantFPSDNode>(StoredVal);
   bool IsExtractVecSrc = (StoredVal.getOpcode() == ISD::EXTRACT_VECTOR_ELT ||
                           StoredVal.getOpcode() == ISD::EXTRACT_SUBVECTOR);
+  bool IsNonTemporalStore = St->isNonTemporal();
+  bool IsNonTemporalLoad =
+      IsLoadSrc && cast<LoadSDNode>(StoredVal)->isNonTemporal();
 
   if (!IsConstantSrc && !IsLoadSrc && !IsExtractVecSrc)
     return false;
@@ -15582,26 +15593,32 @@ bool DAGCombiner::MergeConsecutiveStores(StoreSDNode *St) {
       SDValue NewStoreChain = getMergeStoreChains(StoreNodes, NumElem);
       AddToWorklist(NewStoreChain.getNode());
 
-      MachineMemOperand::Flags MMOFlags =
+      MachineMemOperand::Flags LdMMOFlags =
           isDereferenceable ? MachineMemOperand::MODereferenceable
                             : MachineMemOperand::MONone;
+      if (IsNonTemporalLoad)
+        LdMMOFlags |= MachineMemOperand::MONonTemporal;
+
+      MachineMemOperand::Flags StMMOFlags =
+          IsNonTemporalStore ? MachineMemOperand::MONonTemporal
+                             : MachineMemOperand::MONone;
 
       SDValue NewLoad, NewStore;
       if (UseVectorTy || !DoIntegerTruncate) {
         NewLoad =
             DAG.getLoad(JointMemOpVT, LoadDL, FirstLoad->getChain(),
                         FirstLoad->getBasePtr(), FirstLoad->getPointerInfo(),
-                        FirstLoadAlign, MMOFlags);
+                        FirstLoadAlign, LdMMOFlags);
         NewStore = DAG.getStore(
             NewStoreChain, StoreDL, NewLoad, FirstInChain->getBasePtr(),
-            FirstInChain->getPointerInfo(), FirstStoreAlign);
+            FirstInChain->getPointerInfo(), FirstStoreAlign, StMMOFlags);
       } else { // This must be the truncstore/extload case
         EVT ExtendedTy =
             TLI.getTypeToTransformTo(*DAG.getContext(), JointMemOpVT);
         NewLoad = DAG.getExtLoad(ISD::EXTLOAD, LoadDL, ExtendedTy,
                                  FirstLoad->getChain(), FirstLoad->getBasePtr(),
                                  FirstLoad->getPointerInfo(), JointMemOpVT,
-                                 FirstLoadAlign, MMOFlags);
+                                 FirstLoadAlign, LdMMOFlags);
         NewStore = DAG.getTruncStore(NewStoreChain, StoreDL, NewLoad,
                                      FirstInChain->getBasePtr(),
                                      FirstInChain->getPointerInfo(),

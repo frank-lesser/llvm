@@ -94,7 +94,7 @@ MipsLegalizerInfo::MipsLegalizerInfo(const MipsSubtarget &ST) {
   getActionDefinitionsBuilder(G_FCONSTANT)
       .legalFor({s32, s64});
 
-  getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
+  getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV, G_FABS, G_FSQRT})
       .legalFor({s32, s64});
 
   getActionDefinitionsBuilder(G_FCMP)
@@ -103,6 +103,12 @@ MipsLegalizerInfo::MipsLegalizerInfo(const MipsSubtarget &ST) {
 
   getActionDefinitionsBuilder({G_FCEIL, G_FFLOOR})
       .libcallFor({s32, s64});
+
+  getActionDefinitionsBuilder(G_FPEXT)
+      .legalFor({{s64, s32}});
+
+  getActionDefinitionsBuilder(G_FPTRUNC)
+      .legalFor({{s32, s64}});
 
   computeTables();
   verify(*ST.getInstrInfo());
