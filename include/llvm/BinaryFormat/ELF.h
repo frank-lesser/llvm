@@ -705,6 +705,8 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_GFX909 = 0x031,
   // AMDGCN GFX10.
   EF_AMDGPU_MACH_AMDGCN_GFX1010 = 0x033,
+  EF_AMDGPU_MACH_AMDGCN_GFX1011 = 0x034,
+  EF_AMDGPU_MACH_AMDGCN_GFX1012 = 0x035,
 
   // Reserved for AMDGCN-based processors.
   EF_AMDGPU_MACH_AMDGCN_RESERVED0 = 0x027,
@@ -713,7 +715,7 @@ enum : unsigned {
 
   // First/last AMDGCN-based processors.
   EF_AMDGPU_MACH_AMDGCN_FIRST = EF_AMDGPU_MACH_AMDGCN_GFX600,
-  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX1010,
+  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX1012,
 
   // Indicates if the "xnack" target feature is enabled for all code contained
   // in the object.
@@ -1420,6 +1422,11 @@ enum : unsigned {
   GNU_PROPERTY_X86_FEATURE_2_XSAVE = 1 << 7,
   GNU_PROPERTY_X86_FEATURE_2_XSAVEOPT = 1 << 8,
   GNU_PROPERTY_X86_FEATURE_2_XSAVEC = 1 << 9,
+};
+
+// AMDGPU-specific section indices.
+enum {
+  SHN_AMDGPU_LDS = 0xff00, // Variable in LDS; symbol encoded like SHN_COMMON
 };
 
 // AMD specific notes. (Code Object V2)

@@ -76,6 +76,10 @@ class VectorType;
 
       PIC_ADD,      // Add with a PC operand and a PIC label.
 
+      ASRL,         // MVE long arithmetic shift right.
+      LSRL,         // MVE long shift right.
+      LSLL,         // MVE long shift left.
+
       CMP,          // ARM compare instructions.
       CMN,          // ARM CMN instructions.
       CMPZ,         // ARM compare that sets only Z flag.
@@ -120,6 +124,8 @@ class VectorType;
 
       WIN__CHKSTK,  // Windows' __chkstk call to do stack probing.
       WIN__DBZCHK,  // Windows' divide by zero check
+
+      WLS,          // Low-overhead loops, While Loop Start
 
       VCEQ,         // Vector compare equal.
       VCEQZ,        // Vector compare equal to zero.
@@ -321,6 +327,7 @@ class VectorType;
     /// is "fast" by reference in the second argument.
     bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
                                         unsigned Align,
+                                        MachineMemOperand::Flags Flags,
                                         bool *Fast) const override;
 
     EVT getOptimalMemOpType(uint64_t Size,
@@ -812,6 +819,9 @@ class VectorType;
                                            MachineBasicBlock *MBB) const;
     MachineBasicBlock *EmitLowered__dbzchk(MachineInstr &MI,
                                            MachineBasicBlock *MBB) const;
+    void addMVEVectorTypes(bool HasMVEFP);
+    void addAllExtLoads(const MVT From, const MVT To, LegalizeAction Action);
+    void setAllExpand(MVT VT);
   };
 
   enum NEONModImmType {

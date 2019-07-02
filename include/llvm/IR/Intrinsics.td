@@ -173,6 +173,7 @@ class LLVMScalarOrSameVectorWidth<int idx, LLVMType elty>
 class LLVMPointerTo<int num> : LLVMMatchType<num>;
 class LLVMPointerToElt<int num> : LLVMMatchType<num>;
 class LLVMVectorOfAnyPointersToElt<int num> : LLVMMatchType<num>;
+class LLVMVectorElementType<int num> : LLVMMatchType<num>;
 
 // Match the type of another intrinsic parameter that is expected to be a
 // vector type, but change the element count to be half as many
@@ -1140,45 +1141,45 @@ def int_memset_element_unordered_atomic
 
 //===------------------------ Reduction Intrinsics ------------------------===//
 //
-def int_experimental_vector_reduce_fadd : Intrinsic<[llvm_anyfloat_ty],
-                                                    [LLVMMatchType<0>,
-                                                     llvm_anyvector_ty],
-                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_fmul : Intrinsic<[llvm_anyfloat_ty],
-                                                    [LLVMMatchType<0>,
-                                                     llvm_anyvector_ty],
-                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_add : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_v2_fadd : Intrinsic<[llvm_anyfloat_ty],
+                                                       [LLVMMatchType<0>,
+                                                        llvm_anyvector_ty],
+                                                       [IntrNoMem]>;
+def int_experimental_vector_reduce_v2_fmul : Intrinsic<[llvm_anyfloat_ty],
+                                                       [LLVMMatchType<0>,
+                                                        llvm_anyvector_ty],
+                                                       [IntrNoMem]>;
+def int_experimental_vector_reduce_add : Intrinsic<[LLVMVectorElementType<0>],
                                                    [llvm_anyvector_ty],
                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_mul : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_mul : Intrinsic<[LLVMVectorElementType<0>],
                                                    [llvm_anyvector_ty],
                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_and : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_and : Intrinsic<[LLVMVectorElementType<0>],
                                                    [llvm_anyvector_ty],
                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_or : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_or : Intrinsic<[LLVMVectorElementType<0>],
                                                   [llvm_anyvector_ty],
                                                   [IntrNoMem]>;
-def int_experimental_vector_reduce_xor : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_xor : Intrinsic<[LLVMVectorElementType<0>],
                                                    [llvm_anyvector_ty],
                                                    [IntrNoMem]>;
-def int_experimental_vector_reduce_smax : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_smax : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
-def int_experimental_vector_reduce_smin : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_smin : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
-def int_experimental_vector_reduce_umax : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_umax : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
-def int_experimental_vector_reduce_umin : Intrinsic<[llvm_anyint_ty],
+def int_experimental_vector_reduce_umin : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
-def int_experimental_vector_reduce_fmax : Intrinsic<[llvm_anyfloat_ty],
+def int_experimental_vector_reduce_fmax : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
-def int_experimental_vector_reduce_fmin : Intrinsic<[llvm_anyfloat_ty],
+def int_experimental_vector_reduce_fmin : Intrinsic<[LLVMVectorElementType<0>],
                                                     [llvm_anyvector_ty],
                                                     [IntrNoMem]>;
 
@@ -1188,6 +1189,12 @@ def int_experimental_vector_reduce_fmin : Intrinsic<[llvm_anyfloat_ty],
 // will execute.
 def int_set_loop_iterations :
   Intrinsic<[], [llvm_anyint_ty], [IntrNoDuplicate]>;
+
+// Specify that the value given is the number of iterations that the next loop
+// will execute. Also test that the given count is not zero, allowing it to
+// control entry to a 'while' loop.
+def int_test_set_loop_iterations :
+  Intrinsic<[llvm_i1_ty], [llvm_anyint_ty], [IntrNoDuplicate]>;
 
 // Decrement loop counter by the given argument. Return false if the loop
 // should exit.

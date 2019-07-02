@@ -972,19 +972,20 @@ public:
 
   /// Return true if lowering to a jump table is suitable for a set of case
   /// clusters which may contain \p NumCases cases, \p Range range of values.
-  /// FIXME: This function check the maximum table size and density, but the
-  /// minimum size is not checked. It would be nice if the minimum size is
-  /// also combined within this function. Currently, the minimum size check is
-  /// performed in findJumpTable() in SelectionDAGBuiler and
-  /// getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
   virtual bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
                                       uint64_t Range) const {
+    // FIXME: This function check the maximum table size and density, but the
+    // minimum size is not checked. It would be nice if the minimum size is
+    // also combined within this function. Currently, the minimum size check is
+    // performed in findJumpTable() in SelectionDAGBuiler and
+    // getEstimatedNumberOfCaseClusters() in BasicTTIImpl.
     const bool OptForSize = SI->getParent()->getParent()->hasOptSize();
     const unsigned MinDensity = getMinimumJumpTableDensity(OptForSize);
-    const unsigned MaxJumpTableSize =
-        OptForSize ? UINT_MAX : getMaximumJumpTableSize();
-    // Check whether a range of clusters is dense enough for a jump table.
-    if (Range <= MaxJumpTableSize &&
+    const unsigned MaxJumpTableSize = getMaximumJumpTableSize();
+    
+    // Check whether the number of cases is small enough and
+    // the range is dense enough for a jump table.
+    if ((OptForSize || Range <= MaxJumpTableSize) &&
         (NumCases * 100 >= Range * MinDensity)) {
       return true;
     }
@@ -1384,18 +1385,6 @@ public:
     return OptSize ? MaxLoadsPerMemcmpOptSize : MaxLoadsPerMemcmp;
   }
 
-  /// For memcmp expansion when the memcmp result is only compared equal or
-  /// not-equal to 0, allow up to this number of load pairs per block. As an
-  /// example, this may allow 'memcmp(a, b, 3) == 0' in a single block:
-  ///   a0 = load2bytes &a[0]
-  ///   b0 = load2bytes &b[0]
-  ///   a2 = load1byte  &a[2]
-  ///   b2 = load1byte  &b[2]
-  ///   r  = cmp eq (a0 ^ b0 | a2 ^ b2), 0
-  virtual unsigned getMemcmpEqZeroLoadsPerBlock() const {
-    return 1;
-  }
-
   /// Get maximum # of store operations permitted for llvm.memmove
   ///
   /// This function returns the maximum number of store operations permitted
@@ -1415,10 +1404,10 @@ public:
   /// copy/move/set is converted to a sequence of store operations. Its use
   /// helps to ensure that such replacements don't generate code that causes an
   /// alignment error (trap) on the target machine.
-  virtual bool allowsMisalignedMemoryAccesses(EVT,
-                                              unsigned AddrSpace = 0,
-                                              unsigned Align = 1,
-                                              bool * /*Fast*/ = nullptr) const {
+  virtual bool allowsMisalignedMemoryAccesses(
+      EVT, unsigned AddrSpace = 0, unsigned Align = 1,
+      MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
+      bool * /*Fast*/ = nullptr) const {
     return false;
   }
 
@@ -1426,8 +1415,18 @@ public:
   /// given address space and alignment. If the access is allowed, the optional
   /// final parameter returns if the access is also fast (as defined by the
   /// target).
+  bool
+  allowsMemoryAccess(LLVMContext &Context, const DataLayout &DL, EVT VT,
+                     unsigned AddrSpace = 0, unsigned Alignment = 1,
+                     MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
+                     bool *Fast = nullptr) const;
+
+  /// Return true if the target supports a memory access of this type for the
+  /// given MachineMemOperand. If the access is allowed, the optional
+  /// final parameter returns if the access is also fast (as defined by the
+  /// target).
   bool allowsMemoryAccess(LLVMContext &Context, const DataLayout &DL, EVT VT,
-                          unsigned AddrSpace = 0, unsigned Alignment = 1,
+                          const MachineMemOperand &MMO,
                           bool *Fast = nullptr) const;
 
   /// Returns the target specific optimal type for load and store operations as
@@ -4055,6 +4054,12 @@ private:
                                                SDValue N1, ISD::CondCode Cond,
                                                DAGCombinerInfo &DCI,
                                                const SDLoc &DL) const;
+
+  SDValue prepareUREMEqFold(EVT VT, SDValue N0, SDValue N1, ISD::CondCode Cond,
+                            DAGCombinerInfo &DCI, const SDLoc &DL,
+                            SmallVectorImpl<SDNode *> &Created) const;
+  SDValue buildUREMEqFold(EVT VT, SDValue N0, SDValue N1, ISD::CondCode Cond,
+                          DAGCombinerInfo &DCI, const SDLoc &DL) const;
 };
 
 /// Given an LLVM IR type and return type attributes, compute the return value

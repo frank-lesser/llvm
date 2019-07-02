@@ -710,6 +710,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_SWIFT_SELF;
   case Attribute::UWTable:
     return bitc::ATTR_KIND_UW_TABLE;
+  case Attribute::WillReturn:
+    return bitc::ATTR_KIND_WILLRETURN;
   case Attribute::WriteOnly:
     return bitc::ATTR_KIND_WRITEONLY;
   case Attribute::ZExt:
@@ -938,13 +940,10 @@ void ModuleBitcodeWriter::writeTypeTable() {
     }
     case Type::VectorTyID: {
       VectorType *VT = cast<VectorType>(T);
-      // VECTOR [numelts, eltty] or
-      //        [numelts, eltty, scalable]
+      // VECTOR [numelts, eltty]
       Code = bitc::TYPE_CODE_VECTOR;
       TypeVals.push_back(VT->getNumElements());
       TypeVals.push_back(VE.getTypeID(VT->getElementType()));
-      if (VT->isScalable())
-        TypeVals.push_back(VT->isScalable());
       break;
     }
     }
@@ -3854,6 +3853,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));   // flags
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // fflags
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // entrycount
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // numrefs
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 4));   // immutablerefcnt
   // numrefs x valueid, n x (valueid, hotness)

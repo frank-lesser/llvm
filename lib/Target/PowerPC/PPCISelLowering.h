@@ -194,6 +194,15 @@ namespace llvm {
       /// Direct move of 2 consecutive GPR to a VSX register.
       BUILD_FP128,
 
+      /// BUILD_SPE64 and EXTRACT_SPE are analogous to BUILD_PAIR and
+      /// EXTRACT_ELEMENT but take f64 arguments instead of i64, as i64 is
+      /// unsupported for this target.
+      /// Merge 2 GPRs to a single SPE register.
+      BUILD_SPE64,
+
+      /// Extract SPE register component, second argument is high or low.
+      EXTRACT_SPE,
+
       /// Extract a subvector from signed integer vector and convert to FP.
       /// It is primarily used to convert a (widened) illegal integer vector
       /// type to a legal floating point vector type.
@@ -846,10 +855,10 @@ namespace llvm {
 
     /// Is unaligned memory access allowed for the given type, and is it fast
     /// relative to software emulation.
-    bool allowsMisalignedMemoryAccesses(EVT VT,
-                                        unsigned AddrSpace,
-                                        unsigned Align = 1,
-                                        bool *Fast = nullptr) const override;
+    bool allowsMisalignedMemoryAccesses(
+        EVT VT, unsigned AddrSpace, unsigned Align = 1,
+        MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
+        bool *Fast = nullptr) const override;
 
     /// isFMAFasterThanFMulAndFAdd - Return true if an FMA operation is faster
     /// than a pair of fmul and fadd instructions. fmuladd intrinsics will be
@@ -907,14 +916,6 @@ namespace llvm {
     const MCExpr *getPICJumpTableRelocBaseExpr(const MachineFunction *MF,
                                                unsigned JTI,
                                                MCContext &Ctx) const override;
-
-    unsigned getNumRegistersForCallingConv(LLVMContext &Context,
-                                           CallingConv:: ID CC,
-                                           EVT VT) const override;
-
-    MVT getRegisterTypeForCallingConv(LLVMContext &Context,
-                                      CallingConv:: ID CC,
-                                      EVT VT) const override;
 
   private:
     struct ReuseLoadInfo {

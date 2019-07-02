@@ -294,8 +294,8 @@ bool ISD::matchUnaryPredicate(SDValue Op,
 bool ISD::matchBinaryPredicate(
     SDValue LHS, SDValue RHS,
     std::function<bool(ConstantSDNode *, ConstantSDNode *)> Match,
-    bool AllowUndefs) {
-  if (LHS.getValueType() != RHS.getValueType())
+    bool AllowUndefs, bool AllowTypeMismatch) {
+  if (!AllowTypeMismatch && LHS.getValueType() != RHS.getValueType())
     return false;
 
   // TODO: Add support for scalar UNDEF cases?
@@ -318,8 +318,8 @@ bool ISD::matchBinaryPredicate(
     auto *RHSCst = dyn_cast<ConstantSDNode>(RHSOp);
     if ((!LHSCst && !LHSUndef) || (!RHSCst && !RHSUndef))
       return false;
-    if (LHSOp.getValueType() != SVT ||
-        LHSOp.getValueType() != RHSOp.getValueType())
+    if (!AllowTypeMismatch && (LHSOp.getValueType() != SVT ||
+                               LHSOp.getValueType() != RHSOp.getValueType()))
       return false;
     if (!Match(LHSCst, RHSCst))
       return false;
@@ -2242,6 +2242,12 @@ bool SelectionDAG::MaskedValueIsZero(SDValue V, const APInt &Mask,
                                      const APInt &DemandedElts,
                                      unsigned Depth) const {
   return Mask.isSubsetOf(computeKnownBits(V, DemandedElts, Depth).Zero);
+}
+
+/// MaskedValueIsAllOnes - Return true if '(Op & Mask) == Mask'.
+bool SelectionDAG::MaskedValueIsAllOnes(SDValue V, const APInt &Mask,
+                                        unsigned Depth) const {
+  return Mask.isSubsetOf(computeKnownBits(V, Depth).One);
 }
 
 /// isSplatValue - Return true if the vector V has the same value
@@ -5539,6 +5545,12 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
       // Trivial insertion.
       if (VT.getSimpleVT() == N2.getSimpleValueType())
         return N2;
+
+      // If this is an insert of an extracted vector into an undef vector, we
+      // can just use the input to the extract.
+      if (N1.isUndef() && N2.getOpcode() == ISD::EXTRACT_SUBVECTOR &&
+          N2.getOperand(1) == N3 && N2.getOperand(0).getValueType() == VT)
+        return N2.getOperand(0);
     }
     break;
   }
@@ -6953,7 +6965,7 @@ SDValue SelectionDAG::getMaskedLoad(EVT VT, const SDLoc &dl, SDValue Chain,
   SDValue Ops[] = { Chain, Ptr, Mask, PassThru };
   FoldingSetNodeID ID;
   AddNodeIDNode(ID, ISD::MLOAD, VTs, Ops);
-  ID.AddInteger(VT.getRawBits());
+  ID.AddInteger(MemVT.getRawBits());
   ID.AddInteger(getSyntheticNodeSubclassData<MaskedLoadSDNode>(
       dl.getIROrder(), VTs, ExtTy, isExpanding, MemVT, MMO));
   ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
@@ -6979,12 +6991,11 @@ SDValue SelectionDAG::getMaskedStore(SDValue Chain, const SDLoc &dl,
                                      bool IsTruncating, bool IsCompressing) {
   assert(Chain.getValueType() == MVT::Other &&
         "Invalid chain type");
-  EVT VT = Val.getValueType();
   SDVTList VTs = getVTList(MVT::Other);
   SDValue Ops[] = { Chain, Val, Ptr, Mask };
   FoldingSetNodeID ID;
   AddNodeIDNode(ID, ISD::MSTORE, VTs, Ops);
-  ID.AddInteger(VT.getRawBits());
+  ID.AddInteger(MemVT.getRawBits());
   ID.AddInteger(getSyntheticNodeSubclassData<MaskedStoreSDNode>(
       dl.getIROrder(), VTs, IsTruncating, IsCompressing, MemVT, MMO));
   ID.AddInteger(MMO->getPointerInfo().getAddrSpace());
