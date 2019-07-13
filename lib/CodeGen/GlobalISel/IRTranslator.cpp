@@ -1222,6 +1222,14 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_FABS;
     case Intrinsic::copysign:
       return TargetOpcode::G_FCOPYSIGN;
+    case Intrinsic::minnum:
+      return TargetOpcode::G_FMINNUM;
+    case Intrinsic::maxnum:
+      return TargetOpcode::G_FMAXNUM;
+    case Intrinsic::minimum:
+      return TargetOpcode::G_FMINIMUM;
+    case Intrinsic::maximum:
+      return TargetOpcode::G_FMAXIMUM;
     case Intrinsic::canonicalize:
       return TargetOpcode::G_FCANONICALIZE;
     case Intrinsic::floor:
@@ -2026,6 +2034,14 @@ bool IRTranslator::translateAtomicRMW(const User &U,
                                 Flags, DL->getTypeStoreSize(ResType),
                                 getMemOpAlignment(I), AAMDNodes(), nullptr,
                                 I.getSyncScopeID(), I.getOrdering()));
+  return true;
+}
+
+bool IRTranslator::translateFence(const User &U,
+                                  MachineIRBuilder &MIRBuilder) {
+  const FenceInst &Fence = cast<FenceInst>(U);
+  MIRBuilder.buildFence(static_cast<unsigned>(Fence.getOrdering()),
+                        Fence.getSyncScopeID());
   return true;
 }
 

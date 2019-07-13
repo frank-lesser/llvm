@@ -39,6 +39,9 @@
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/BasicBlock.h"
+#ifdef EXPENSIVE_CHECKS
+#include "llvm/IR/Dominators.h"
+#endif
 #include "llvm/IR/Instruction.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Support/Casting.h"
@@ -136,8 +139,11 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AMDGPUArgumentUsageInfo>();
-    AU.addRequired<AMDGPUPerfHintAnalysis>();
     AU.addRequired<LegacyDivergenceAnalysis>();
+#ifdef EXPENSIVE_CHECKS
+    AU.addRequired<DominatorTreeWrapperPass>();
+    AU.addRequired<LoopInfoWrapperPass>();
+#endif
     SelectionDAGISel::getAnalysisUsage(AU);
   }
 
@@ -224,6 +230,7 @@ private:
   bool SelectMOVRELOffset(SDValue Index, SDValue &Base, SDValue &Offset) const;
 
   bool SelectVOP3Mods_NNaN(SDValue In, SDValue &Src, SDValue &SrcMods) const;
+  bool SelectVOP3Mods_f32(SDValue In, SDValue &Src, SDValue &SrcMods) const;
   bool SelectVOP3ModsImpl(SDValue In, SDValue &Src, unsigned &SrcMods) const;
   bool SelectVOP3Mods(SDValue In, SDValue &Src, SDValue &SrcMods) const;
   bool SelectVOP3NoMods(SDValue In, SDValue &Src) const;
@@ -351,6 +358,10 @@ INITIALIZE_PASS_BEGIN(AMDGPUDAGToDAGISel, "amdgpu-isel",
 INITIALIZE_PASS_DEPENDENCY(AMDGPUArgumentUsageInfo)
 INITIALIZE_PASS_DEPENDENCY(AMDGPUPerfHintAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
+#ifdef EXPENSIVE_CHECKS
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+#endif
 INITIALIZE_PASS_END(AMDGPUDAGToDAGISel, "amdgpu-isel",
                     "AMDGPU DAG->DAG Pattern Instruction Selection", false, false)
 
@@ -369,6 +380,13 @@ FunctionPass *llvm::createR600ISelDag(TargetMachine *TM,
 }
 
 bool AMDGPUDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
+#ifdef EXPENSIVE_CHECKS
+  DominatorTree & DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+  LoopInfo * LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+  for (auto &L : LI->getLoopsInPreorder()) {
+    assert(L->isLCSSAForm(DT));
+  }
+#endif
   Subtarget = &MF.getSubtarget<GCNSubtarget>();
   return SelectionDAGISel::runOnMachineFunction(MF);
 }
@@ -630,6 +648,8 @@ static unsigned selectSGPRVectorRegClassID(unsigned NumVectorElts) {
     return AMDGPU::SReg_256RegClassID;
   case 16:
     return AMDGPU::SReg_512RegClassID;
+  case 32:
+    return AMDGPU::SReg_1024RegClassID;
   }
 
   llvm_unreachable("invalid vector size");
@@ -648,12 +668,12 @@ void AMDGPUDAGToDAGISel::SelectBuildVector(SDNode *N, unsigned RegClassID) {
     return;
   }
 
-  assert(NumVectorElts <= 16 && "Vectors with more than 16 elements not "
+  assert(NumVectorElts <= 32 && "Vectors with more than 32 elements not "
                                   "supported yet");
-  // 16 = Max Num Vector Elements
+  // 32 = Max Num Vector Elements
   // 2 = 2 REG_SEQUENCE operands per element (value, subreg index)
   // 1 = Vector Register Class
-  SmallVector<SDValue, 16 * 2 + 1> RegSeqArgs(NumVectorElts * 2 + 1);
+  SmallVector<SDValue, 32 * 2 + 1> RegSeqArgs(NumVectorElts * 2 + 1);
 
   RegSeqArgs[0] = CurDAG->getTargetConstant(RegClassID, DL, MVT::i32);
   bool IsRegSeq = true;
@@ -2264,6 +2284,15 @@ bool AMDGPUDAGToDAGISel::SelectVOP3Mods_NNaN(SDValue In, SDValue &Src,
                                              SDValue &SrcMods) const {
   SelectVOP3Mods(In, Src, SrcMods);
   return isNoNanSrc(Src);
+}
+
+bool AMDGPUDAGToDAGISel::SelectVOP3Mods_f32(SDValue In, SDValue &Src,
+                                            SDValue &SrcMods) const {
+  if (In.getValueType() == MVT::f32)
+    return SelectVOP3Mods(In, Src, SrcMods);
+  Src = In;
+  SrcMods = CurDAG->getTargetConstant(0, SDLoc(In), MVT::i32);;
+  return true;
 }
 
 bool AMDGPUDAGToDAGISel::SelectVOP3NoMods(SDValue In, SDValue &Src) const {
