@@ -1998,6 +1998,15 @@ bool isKnownNonZero(const Value *V, unsigned Depth, const Query &Q) {
       // Must be non-zero due to null test above.
       return true;
 
+    if (auto *CE = dyn_cast<ConstantExpr>(C)) {
+      // See the comment for IntToPtr/PtrToInt instructions below.
+      if (CE->getOpcode() == Instruction::IntToPtr ||
+          CE->getOpcode() == Instruction::PtrToInt)
+        if (Q.DL.getTypeSizeInBits(CE->getOperand(0)->getType()) <=
+            Q.DL.getTypeSizeInBits(CE->getType()))
+          return isKnownNonZero(CE->getOperand(0), Depth, Q);
+    }
+
     // For constant vectors, check that all elements are undefined or known
     // non-zero to determine that the whole vector is known non-zero.
     if (auto *VecTy = dyn_cast<VectorType>(C->getType())) {
@@ -3657,7 +3666,8 @@ bool llvm::isIntrinsicReturningPointerAliasingArgumentWithoutCapturing(
     const CallBase *Call) {
   return Call->getIntrinsicID() == Intrinsic::launder_invariant_group ||
          Call->getIntrinsicID() == Intrinsic::strip_invariant_group ||
-         Call->getIntrinsicID() == Intrinsic::aarch64_irg;
+         Call->getIntrinsicID() == Intrinsic::aarch64_irg ||
+         Call->getIntrinsicID() == Intrinsic::aarch64_tagp;
 }
 
 /// \p PN defines a loop-variant pointer to an object.  Check if the
