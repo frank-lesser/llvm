@@ -691,7 +691,7 @@ def int_aarch64_crc32cx : Intrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i64_ty],
 // Memory Tagging Extensions (MTE) Intrinsics
 let TargetPrefix = "aarch64" in {
 def int_aarch64_irg   : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_i64_ty],
-    [IntrInaccessibleMemOnly]>;
+    [IntrNoMem, IntrHasSideEffects]>;
 def int_aarch64_addg  : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_i64_ty],
     [IntrNoMem]>;
 def int_aarch64_gmi   : Intrinsic<[llvm_i64_ty], [llvm_ptr_ty, llvm_i64_ty],
@@ -707,7 +707,7 @@ def int_aarch64_subp :  Intrinsic<[llvm_i64_ty], [llvm_ptr_ty, llvm_ptr_ty],
 
 // Generate a randomly tagged stack base pointer.
 def int_aarch64_irg_sp   : Intrinsic<[llvm_ptr_ty], [llvm_i64_ty],
-    [IntrInaccessibleMemOnly]>;
+    [IntrNoMem, IntrHasSideEffects]>;
 
 // Transfer pointer tag with offset.
 // ptr1 = tagp(ptr0, baseptr, tag_offset) returns a pointer where
@@ -732,4 +732,19 @@ def int_aarch64_settag_zero  : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty],
 // Update allocation tags for 16-aligned, 16-sized memory region, and store a pair 8-byte values.
 def int_aarch64_stgp  : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty, llvm_i64_ty],
     [IntrWriteMem, IntrArgMemOnly, NoCapture<0>, WriteOnly<0>]>;
+}
+
+// Transactional Memory Extension (TME) Intrinsics
+let TargetPrefix = "aarch64" in {
+def int_aarch64_tstart  : GCCBuiltin<"__builtin_arm_tstart">,
+                         Intrinsic<[llvm_i64_ty]>;
+
+def int_aarch64_tcommit : GCCBuiltin<"__builtin_arm_tcommit">, Intrinsic<[]>;
+
+def int_aarch64_tcancel : GCCBuiltin<"__builtin_arm_tcancel">,
+                          Intrinsic<[], [llvm_i64_ty], [ImmArg<0>]>;
+
+def int_aarch64_ttest   : GCCBuiltin<"__builtin_arm_ttest">,
+                          Intrinsic<[llvm_i64_ty], [],
+                                    [IntrNoMem, IntrHasSideEffects]>;
 }

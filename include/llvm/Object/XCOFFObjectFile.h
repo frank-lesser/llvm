@@ -13,23 +13,8 @@
 #ifndef LLVM_OBJECT_XCOFFOBJECTFILE_H
 #define LLVM_OBJECT_XCOFFOBJECTFILE_H
 
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/iterator_range.h"
-#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/BinaryFormat/XCOFF.h"
-#include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Object/Binary.h"
-#include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Object/SymbolicFile.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/Error.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include <cassert>
-#include <cstdint>
-#include <memory>
-#include <system_error>
 
 namespace llvm {
 namespace object {
@@ -63,7 +48,7 @@ struct XCOFFFileHeader64 {
 };
 
 struct XCOFFSectionHeader32 {
-  char Name[XCOFF::SectionNameSize];
+  char Name[XCOFF::NameSize];
   support::ubig32_t PhysicalAddress;
   support::ubig32_t VirtualAddress;
   support::ubig32_t SectionSize;
@@ -78,7 +63,7 @@ struct XCOFFSectionHeader32 {
 };
 
 struct XCOFFSectionHeader64 {
-  char Name[XCOFF::SectionNameSize];
+  char Name[XCOFF::NameSize];
   support::ubig64_t PhysicalAddress;
   support::ubig64_t VirtualAddress;
   support::ubig64_t SectionSize;
@@ -106,7 +91,7 @@ struct XCOFFSymbolEntry {
   } CFileLanguageIdAndTypeIdType;
 
   union {
-    char SymbolName[XCOFF::SymbolNameSize];
+    char SymbolName[XCOFF::NameSize];
     NameInStrTblType NameInStrTbl;
   };
 

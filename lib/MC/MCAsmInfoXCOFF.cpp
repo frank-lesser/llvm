@@ -15,4 +15,6 @@ void MCAsmInfoXCOFF::anchor() {}
 MCAsmInfoXCOFF::MCAsmInfoXCOFF() {
   IsLittleEndian = false;
   HasDotTypeDotSizeDirective = false;
+  COMMDirectiveAlignmentIsInBytes = false;
+  LCOMMDirectiveAlignmentType = LCOMM::Log2Alignment;
 }

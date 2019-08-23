@@ -397,7 +397,7 @@ void SectionWriter::visit(const OwnedDataSection &Sec) {
   llvm::copy(Sec.Data, Out.getBufferStart() + Sec.Offset);
 }
 
-static const std::vector<uint8_t> ZlibGnuMagic = {'Z', 'L', 'I', 'B'};
+static constexpr std::array<uint8_t, 4> ZlibGnuMagic = {'Z', 'L', 'I', 'B'};
 
 static bool isDataGnuCompressed(ArrayRef<uint8_t> Data) {
   return Data.size() > ZlibGnuMagic.size() &&
@@ -665,7 +665,7 @@ void SymbolTableSection::addSymbol(Twine Name, uint8_t Bind, uint8_t Type,
   Sym.Visibility = Visibility;
   Sym.Size = SymbolSize;
   Sym.Index = Symbols.size();
-  Symbols.emplace_back(llvm::make_unique<Symbol>(Sym));
+  Symbols.emplace_back(std::make_unique<Symbol>(Sym));
   Size += this->EntrySize;
 }
 
@@ -1645,7 +1645,7 @@ std::unique_ptr<Object> IHexReader::create() const {
 }
 
 std::unique_ptr<Object> ELFReader::create() const {
-  auto Obj = llvm::make_unique<Object>();
+  auto Obj = std::make_unique<Object>();
   if (auto *O = dyn_cast<ELFObjectFile<ELF32LE>>(Bin)) {
     ELFBuilder<ELF32LE> Builder(*O, *Obj, ExtractPartition);
     Builder.build();
@@ -1995,6 +1995,25 @@ template <class ELFT> Error ELFWriter<ELFT>::write() {
   return Buf.commit();
 }
 
+static Error removeUnneededSections(Object &Obj) {
+  // We can remove an empty symbol table from non-relocatable objects.
+  // Relocatable objects typically have relocation sections whose
+  // sh_link field points to .symtab, so we can't remove .symtab
+  // even if it is empty.
+  if (Obj.isRelocatable() || Obj.SymbolTable == nullptr ||
+      !Obj.SymbolTable->empty())
+    return Error::success();
+
+  // .strtab can be used for section names. In such a case we shouldn't
+  // remove it.
+  auto *StrTab = Obj.SymbolTable->getStrTab() == Obj.SectionNames
+                     ? nullptr
+                     : Obj.SymbolTable->getStrTab();
+  return Obj.removeSections(false, [&](const SectionBase &Sec) {
+    return &Sec == Obj.SymbolTable || &Sec == StrTab;
+  });
+}
+
 template <class ELFT> Error ELFWriter<ELFT>::finalize() {
   // It could happen that SectionNames has been removed and yet the user wants
   // a section header table output. We need to throw an error if a user tries
@@ -2004,6 +2023,8 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
                              "cannot write section header table because "
                              "section header string table was removed");
 
+  if (Error E = removeUnneededSections(Obj))
+    return E;
   Obj.sortSections();
 
   // We need to assign indexes before we perform layout because we need to know
@@ -2055,7 +2076,7 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
   // Also, the output arch may not be the same as the input arch, so fix up
   // size-related fields before doing layout calculations.
   uint64_t Index = 0;
-  auto SecSizer = llvm::make_unique<ELFSectionSizer<ELFT>>();
+  auto SecSizer = std::make_unique<ELFSectionSizer<ELFT>>();
   for (auto &Sec : Obj.sections()) {
     Sec.Index = Index++;
     Sec.accept(*SecSizer);
@@ -2093,7 +2114,7 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
 
   if (Error E = Buf.allocate(totalSize()))
     return E;
-  SecWriter = llvm::make_unique<ELFSectionWriter<ELFT>>(Buf);
+  SecWriter = std::make_unique<ELFSectionWriter<ELFT>>(Buf);
   return Error::success();
 }
 
@@ -2179,7 +2200,7 @@ Error BinaryWriter::finalize() {
 
   if (Error E = Buf.allocate(TotalSize))
     return E;
-  SecWriter = llvm::make_unique<BinarySectionWriter>(Buf);
+  SecWriter = std::make_unique<BinarySectionWriter>(Buf);
   return Error::success();
 }
 

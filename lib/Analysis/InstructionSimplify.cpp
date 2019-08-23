@@ -56,8 +56,8 @@ static Value *simplifyFPUnOp(unsigned, Value *, const FastMathFlags &,
                              const SimplifyQuery &, unsigned);
 static Value *SimplifyBinOp(unsigned, Value *, Value *, const SimplifyQuery &,
                             unsigned);
-static Value *SimplifyFPBinOp(unsigned, Value *, Value *, const FastMathFlags &,
-                              const SimplifyQuery &, unsigned);
+static Value *SimplifyBinOp(unsigned, Value *, Value *, const FastMathFlags &,
+                            const SimplifyQuery &, unsigned);
 static Value *SimplifyCmpInst(unsigned, Value *, Value *, const SimplifyQuery &,
                               unsigned);
 static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
@@ -3529,6 +3529,9 @@ static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
     //   %sel = select i1 %cmp, i32 -2147483648, i32 %add
     //
     // We can't replace %sel with %add unless we strip away the flags.
+    // TODO: This is an unusual limitation because better analysis results in
+    //       worse simplification. InstCombine can do this fold more generally
+    //       by dropping the flags. Remove this fold to save compile-time?
     if (isa<OverflowingBinaryOperator>(B))
       if (Q.IIQ.hasNoSignedWrap(B) || Q.IIQ.hasNoUnsignedWrap(B))
         return nullptr;
@@ -4564,8 +4567,7 @@ static Value *simplifyUnOp(unsigned Opcode, Value *Op, const SimplifyQuery &Q,
 
 /// Given the operand for a UnaryOperator, see if we can fold the result.
 /// If not, this returns null.
-/// In contrast to SimplifyUnOp, try to use FastMathFlag when folding the
-/// result. In case we don't need FastMathFlags, simply fall to SimplifyUnOp.
+/// Try to use FastMathFlags when folding the result.
 static Value *simplifyFPUnOp(unsigned Opcode, Value *Op,
                              const FastMathFlags &FMF,
                              const SimplifyQuery &Q, unsigned MaxRecurse) {
@@ -4581,8 +4583,8 @@ Value *llvm::SimplifyUnOp(unsigned Opcode, Value *Op, const SimplifyQuery &Q) {
   return ::simplifyUnOp(Opcode, Op, Q, RecursionLimit);
 }
 
-Value *llvm::SimplifyFPUnOp(unsigned Opcode, Value *Op, FastMathFlags FMF,
-                            const SimplifyQuery &Q) {
+Value *llvm::SimplifyUnOp(unsigned Opcode, Value *Op, FastMathFlags FMF,
+                          const SimplifyQuery &Q) {
   return ::simplifyFPUnOp(Opcode, Op, FMF, Q, RecursionLimit);
 }
 
@@ -4634,11 +4636,10 @@ static Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
 
 /// Given operands for a BinaryOperator, see if we can fold the result.
 /// If not, this returns null.
-/// In contrast to SimplifyBinOp, try to use FastMathFlag when folding the
-/// result. In case we don't need FastMathFlags, simply fall to SimplifyBinOp.
-static Value *SimplifyFPBinOp(unsigned Opcode, Value *LHS, Value *RHS,
-                              const FastMathFlags &FMF, const SimplifyQuery &Q,
-                              unsigned MaxRecurse) {
+/// Try to use FastMathFlags when folding the result.
+static Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
+                            const FastMathFlags &FMF, const SimplifyQuery &Q,
+                            unsigned MaxRecurse) {
   switch (Opcode) {
   case Instruction::FAdd:
     return SimplifyFAddInst(LHS, RHS, FMF, Q, MaxRecurse);
@@ -4658,9 +4659,9 @@ Value *llvm::SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
   return ::SimplifyBinOp(Opcode, LHS, RHS, Q, RecursionLimit);
 }
 
-Value *llvm::SimplifyFPBinOp(unsigned Opcode, Value *LHS, Value *RHS,
-                             FastMathFlags FMF, const SimplifyQuery &Q) {
-  return ::SimplifyFPBinOp(Opcode, LHS, RHS, FMF, Q, RecursionLimit);
+Value *llvm::SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
+                           FastMathFlags FMF, const SimplifyQuery &Q) {
+  return ::SimplifyBinOp(Opcode, LHS, RHS, FMF, Q, RecursionLimit);
 }
 
 /// Given operands for a CmpInst, see if we can fold the result.

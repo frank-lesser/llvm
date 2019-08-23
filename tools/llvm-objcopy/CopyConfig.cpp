@@ -232,6 +232,7 @@ static Expected<NewSymbolInfo> parseNewSymbolInfo(StringRef FlagValue) {
             .CaseLower("weak", [&SI] { SI.Bind = ELF::STB_WEAK; })
             .CaseLower("default", [&SI] { SI.Visibility = ELF::STV_DEFAULT; })
             .CaseLower("hidden", [&SI] { SI.Visibility = ELF::STV_HIDDEN; })
+            .CaseLower("protected", [&SI] { SI.Visibility = ELF::STV_PROTECTED; })
             .CaseLower("file", [&SI] { SI.Type = ELF::STT_FILE; })
             .CaseLower("section", [&SI] { SI.Type = ELF::STT_SECTION; })
             .CaseLower("object", [&SI] { SI.Type = ELF::STT_OBJECT; })
@@ -341,9 +342,8 @@ getOutputTargetInfoByTargetName(StringRef TargetName) {
   return {TargetInfo{Format, MI}};
 }
 
-static Error addSymbolsFromFile(std::vector<NameOrRegex> &Symbols,
-                                BumpPtrAllocator &Alloc, StringRef Filename,
-                                bool UseRegex) {
+static Error addSymbolsFromFile(NameMatcher &Symbols, BumpPtrAllocator &Alloc,
+                                StringRef Filename, bool UseRegex) {
   StringSaver Saver(Alloc);
   SmallVector<StringRef, 16> Lines;
   auto BufOrErr = MemoryBuffer::getFile(Filename);
@@ -356,7 +356,7 @@ static Error addSymbolsFromFile(std::vector<NameOrRegex> &Symbols,
     // it's not empty.
     auto TrimmedLine = Line.split('#').first.trim();
     if (!TrimmedLine.empty())
-      Symbols.emplace_back(Saver.save(TrimmedLine), UseRegex);
+      Symbols.addMatcher({Saver.save(TrimmedLine), UseRegex});
   }
 
   return Error::success();
@@ -612,13 +612,22 @@ Expected<DriverConfig> parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
   }
 
   for (auto Arg : InputArgs.filtered(OBJCOPY_remove_section))
-    Config.ToRemove.emplace_back(Arg->getValue(), UseRegex);
+    Config.ToRemove.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_section))
-    Config.KeepSection.emplace_back(Arg->getValue(), UseRegex);
+    Config.KeepSection.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_only_section))
-    Config.OnlySection.emplace_back(Arg->getValue(), UseRegex);
-  for (auto Arg : InputArgs.filtered(OBJCOPY_add_section))
-    Config.AddSection.push_back(Arg->getValue());
+    Config.OnlySection.addMatcher({Arg->getValue(), UseRegex});
+  for (auto Arg : InputArgs.filtered(OBJCOPY_add_section)) {
+    StringRef ArgValue(Arg->getValue());
+    if (!ArgValue.contains('='))
+      return createStringError(errc::invalid_argument,
+                               "bad format for --add-section: missing '='");
+    if (ArgValue.split("=").second.empty())
+      return createStringError(
+          errc::invalid_argument,
+          "bad format for --add-section: missing file name");
+    Config.AddSection.push_back(ArgValue);
+  }
   for (auto Arg : InputArgs.filtered(OBJCOPY_dump_section))
     Config.DumpSection.push_back(Arg->getValue());
   Config.StripAll = InputArgs.hasArg(OBJCOPY_strip_all);
@@ -645,43 +654,43 @@ Expected<DriverConfig> parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
   if (Config.DiscardMode == DiscardType::All)
     Config.StripDebug = true;
   for (auto Arg : InputArgs.filtered(OBJCOPY_localize_symbol))
-    Config.SymbolsToLocalize.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToLocalize.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_localize_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToLocalize, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_global_symbol))
-    Config.SymbolsToKeepGlobal.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToKeepGlobal.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_global_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToKeepGlobal, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_globalize_symbol))
-    Config.SymbolsToGlobalize.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToGlobalize.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_globalize_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToGlobalize, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_weaken_symbol))
-    Config.SymbolsToWeaken.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToWeaken.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_weaken_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToWeaken, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_strip_symbol))
-    Config.SymbolsToRemove.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToRemove.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_strip_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToRemove, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_strip_unneeded_symbol))
-    Config.UnneededSymbolsToRemove.emplace_back(Arg->getValue(), UseRegex);
+    Config.UnneededSymbolsToRemove.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_strip_unneeded_symbols))
     if (Error E = addSymbolsFromFile(Config.UnneededSymbolsToRemove, DC.Alloc,
                                      Arg->getValue(), UseRegex))
       return std::move(E);
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbol))
-    Config.SymbolsToKeep.emplace_back(Arg->getValue(), UseRegex);
+    Config.SymbolsToKeep.addMatcher({Arg->getValue(), UseRegex});
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbols))
     if (Error E = addSymbolsFromFile(Config.SymbolsToKeep, DC.Alloc,
                                      Arg->getValue(), UseRegex))
@@ -801,6 +810,7 @@ parseStripOptions(ArrayRef<const char *> ArgsArr,
         InputArgs.hasFlag(STRIP_discard_all, STRIP_discard_locals)
             ? DiscardType::All
             : DiscardType::Locals;
+  Config.StripSections = InputArgs.hasArg(STRIP_strip_sections);
   Config.StripUnneeded = InputArgs.hasArg(STRIP_strip_unneeded);
   if (auto Arg = InputArgs.getLastArg(STRIP_strip_all, STRIP_no_strip_all))
     Config.StripAll = Arg->getOption().getID() == STRIP_strip_all;
@@ -809,16 +819,16 @@ parseStripOptions(ArrayRef<const char *> ArgsArr,
   Config.KeepFileSymbols = InputArgs.hasArg(STRIP_keep_file_symbols);
 
   for (auto Arg : InputArgs.filtered(STRIP_keep_section))
-    Config.KeepSection.emplace_back(Arg->getValue(), UseRegexp);
+    Config.KeepSection.addMatcher({Arg->getValue(), UseRegexp});
 
   for (auto Arg : InputArgs.filtered(STRIP_remove_section))
-    Config.ToRemove.emplace_back(Arg->getValue(), UseRegexp);
+    Config.ToRemove.addMatcher({Arg->getValue(), UseRegexp});
 
   for (auto Arg : InputArgs.filtered(STRIP_strip_symbol))
-    Config.SymbolsToRemove.emplace_back(Arg->getValue(), UseRegexp);
+    Config.SymbolsToRemove.addMatcher({Arg->getValue(), UseRegexp});
 
   for (auto Arg : InputArgs.filtered(STRIP_keep_symbol))
-    Config.SymbolsToKeep.emplace_back(Arg->getValue(), UseRegexp);
+    Config.SymbolsToKeep.addMatcher({Arg->getValue(), UseRegexp});
 
   if (!InputArgs.hasArg(STRIP_no_strip_all) && !Config.StripDebug &&
       !Config.StripUnneeded && Config.DiscardMode == DiscardType::None &&

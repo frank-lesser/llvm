@@ -98,6 +98,12 @@ static LegalityPredicate isRegisterType(unsigned TypeIdx) {
   };
 }
 
+static LegalityPredicate elementTypeIs(unsigned TypeIdx, LLT Type) {
+  return [=](const LegalityQuery &Query) {
+    return Query.Types[TypeIdx].getElementType() == Type;
+  };
+}
+
 AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
                                          const GCNTargetMachine &TM)
   :  ST(ST_) {
@@ -511,6 +517,7 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       [](const LegalityQuery &Query) {
         return std::make_pair(0, LLT::scalar(32));
       })
+    .moreElementsIf(isSmallOddVector(0), oneMoreElement(0))
     .fewerElementsIf([=](const LegalityQuery &Query) {
         unsigned MemSize = Query.MMODescrs[0].SizeInBits;
         return (MemSize == 96) &&
@@ -591,6 +598,9 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
   if (ST.hasFlatAddressSpace()) {
     Atomics.legalFor({{S32, FlatPtr}, {S64, FlatPtr}});
   }
+
+  getActionDefinitionsBuilder(G_ATOMICRMW_FADD)
+    .legalFor({{S32, LocalPtr}});
 
   // TODO: Pointer types, any 32-bit or 64-bit vector
   getActionDefinitionsBuilder(G_SELECT)
@@ -700,6 +710,9 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
   getActionDefinitionsBuilder(G_CONCAT_VECTORS)
     .legalIf(isRegisterType(0));
 
+  // TODO: Don't fully scalarize v2s16 pieces
+  getActionDefinitionsBuilder(G_SHUFFLE_VECTOR).lower();
+
   // Merge/Unmerge
   for (unsigned Op : {G_MERGE_VALUES, G_UNMERGE_VALUES}) {
     unsigned BigTyIdx = Op == G_MERGE_VALUES ? 0 : 1;
@@ -724,7 +737,10 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       // valid.
       .clampScalar(LitTyIdx, S16, S256)
       .widenScalarToNextPow2(LitTyIdx, /*Min*/ 32)
-
+      .moreElementsIf(isSmallOddVector(BigTyIdx), oneMoreElement(BigTyIdx))
+      .fewerElementsIf(all(typeIs(0, S16), vectorWiderThan(1, 32),
+                           elementTypeIs(1, S16)),
+                       changeTo(1, V2S16))
       // Break up vectors with weird elements into scalars
       .fewerElementsIf(
         [=](const LegalityQuery &Query) { return notValidElt(Query, 0); },
@@ -733,6 +749,7 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
         [=](const LegalityQuery &Query) { return notValidElt(Query, 1); },
         scalarize(1))
       .clampScalar(BigTyIdx, S32, S512)
+      .lowerFor({{S16, V2S16}})
       .widenScalarIf(
         [=](const LegalityQuery &Query) {
           const LLT &Ty = Query.Types[BigTyIdx];
@@ -768,6 +785,8 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       .scalarize(0)
       .scalarize(1);
   }
+
+  getActionDefinitionsBuilder(G_SEXT_INREG).lower();
 
   computeTables();
   verify(*ST.getInstrInfo());
@@ -1274,6 +1293,42 @@ bool AMDGPULegalizerInfo::legalizePreloadedArgIntrin(
   return false;
 }
 
+bool AMDGPULegalizerInfo::legalizeFDIVFast(MachineInstr &MI,
+                                           MachineRegisterInfo &MRI,
+                                           MachineIRBuilder &B) const {
+  B.setInstr(MI);
+  Register Res = MI.getOperand(0).getReg();
+  Register LHS = MI.getOperand(2).getReg();
+  Register RHS = MI.getOperand(3).getReg();
+  uint16_t Flags = MI.getFlags();
+
+  LLT S32 = LLT::scalar(32);
+  LLT S1 = LLT::scalar(1);
+
+  auto Abs = B.buildFAbs(S32, RHS, Flags);
+  const APFloat C0Val(1.0f);
+
+  auto C0 = B.buildConstant(S32, 0x6f800000);
+  auto C1 = B.buildConstant(S32, 0x2f800000);
+  auto C2 = B.buildConstant(S32, FloatToBits(1.0f));
+
+  auto CmpRes = B.buildFCmp(CmpInst::FCMP_OGT, S1, Abs, C0, Flags);
+  auto Sel = B.buildSelect(S32, CmpRes, C1, C2, Flags);
+
+  auto Mul0 = B.buildFMul(S32, RHS, Sel, Flags);
+
+  auto RCP = B.buildIntrinsic(Intrinsic::amdgcn_rcp, {S32}, false)
+    .addUse(Mul0.getReg(0))
+    .setMIFlags(Flags);
+
+  auto Mul1 = B.buildFMul(S32, LHS, RCP, Flags);
+
+  B.buildFMul(Res, Sel, Mul1, Flags);
+
+  MI.eraseFromParent();
+  return true;
+}
+
 bool AMDGPULegalizerInfo::legalizeImplicitArgPtr(MachineInstr &MI,
                                                  MachineRegisterInfo &MRI,
                                                  MachineIRBuilder &B) const {
@@ -1388,6 +1443,8 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
   case Intrinsic::amdgcn_dispatch_id:
     return legalizePreloadedArgIntrin(MI, MRI, B,
                                       AMDGPUFunctionArgInfo::DISPATCH_ID);
+  case Intrinsic::amdgcn_fdiv_fast:
+    return legalizeFDIVFast(MI, MRI, B);
   default:
     return true;
   }

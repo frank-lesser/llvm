@@ -249,6 +249,10 @@ static std::string explainPredicates(const TreePatternNode *N) {
       OS << ']';
     }
 
+    int64_t MinAlign = P.getMinAlignment();
+    if (MinAlign > 0)
+      Explanation += " MinAlign=" + utostr(MinAlign);
+
     if (P.isAtomicOrderingMonotonic())
       Explanation += " monotonic";
     if (P.isAtomicOrderingAcquire())
@@ -328,6 +332,9 @@ static Error isTrivialOperatorNode(const TreePatternNode *N) {
     if (Predicate.isLoad() || Predicate.isStore() || Predicate.isAtomic()) {
       const ListInit *AddrSpaces = Predicate.getAddressSpaces();
       if (AddrSpaces && !AddrSpaces->empty())
+        continue;
+
+      if (Predicate.getMinAlignment() > 0)
         continue;
     }
 
@@ -1052,6 +1059,7 @@ public:
     IPM_MemoryLLTSize,
     IPM_MemoryVsLLTSize,
     IPM_MemoryAddressSpace,
+    IPM_MemoryAlignment,
     IPM_GenericPredicate,
     OPM_SameOperand,
     OPM_ComplexPattern,
@@ -1442,7 +1450,7 @@ public:
   Optional<Kind *> addPredicate(Args &&... args) {
     if (isSameAsAnotherOperand())
       return None;
-    Predicates.emplace_back(llvm::make_unique<Kind>(
+    Predicates.emplace_back(std::make_unique<Kind>(
         getInsnVarID(), getOpIdx(), std::forward<Args>(args)...));
     return static_cast<Kind *>(Predicates.back().get());
   }
@@ -1849,6 +1857,40 @@ public:
   }
 };
 
+class MemoryAlignmentPredicateMatcher : public InstructionPredicateMatcher {
+protected:
+  unsigned MMOIdx;
+  int MinAlign;
+
+public:
+  MemoryAlignmentPredicateMatcher(unsigned InsnVarID, unsigned MMOIdx,
+                                  int MinAlign)
+      : InstructionPredicateMatcher(IPM_MemoryAlignment, InsnVarID),
+        MMOIdx(MMOIdx), MinAlign(MinAlign) {
+    assert(MinAlign > 0);
+  }
+
+  static bool classof(const PredicateMatcher *P) {
+    return P->getKind() == IPM_MemoryAlignment;
+  }
+
+  bool isIdentical(const PredicateMatcher &B) const override {
+    if (!InstructionPredicateMatcher::isIdentical(B))
+      return false;
+    auto *Other = cast<MemoryAlignmentPredicateMatcher>(&B);
+    return MMOIdx == Other->MMOIdx && MinAlign == Other->MinAlign;
+  }
+
+  void emitPredicateOpcodes(MatchTable &Table,
+                            RuleMatcher &Rule) const override {
+    Table << MatchTable::Opcode("GIM_CheckMemoryAlignment")
+          << MatchTable::Comment("MI") << MatchTable::IntValue(InsnVarID)
+          << MatchTable::Comment("MMO") << MatchTable::IntValue(MMOIdx)
+          << MatchTable::Comment("MinAlign") << MatchTable::IntValue(MinAlign)
+          << MatchTable::LineBreak;
+  }
+};
+
 /// Generates code to check that the size of an MMO is less-than, equal-to, or
 /// greater than a given LLT.
 class MemoryVsLLTSizePredicateMatcher : public InstructionPredicateMatcher {
@@ -1957,7 +1999,7 @@ public:
   template <class Kind, class... Args>
   Optional<Kind *> addPredicate(Args &&... args) {
     Predicates.emplace_back(
-        llvm::make_unique<Kind>(getInsnVarID(), std::forward<Args>(args)...));
+        std::make_unique<Kind>(getInsnVarID(), std::forward<Args>(args)...));
     return static_cast<Kind *>(Predicates.back().get());
   }
 
@@ -2620,7 +2662,7 @@ public:
   template <class Kind, class... Args>
   Kind &addRenderer(Args&&... args) {
     OperandRenderers.emplace_back(
-        llvm::make_unique<Kind>(InsnID, std::forward<Args>(args)...));
+        std::make_unique<Kind>(InsnID, std::forward<Args>(args)...));
     return *static_cast<Kind *>(OperandRenderers.back().get());
   }
 
@@ -2781,7 +2823,7 @@ const std::vector<Record *> &RuleMatcher::getRequiredFeatures() const {
 // iterator.
 template <class Kind, class... Args>
 Kind &RuleMatcher::addAction(Args &&... args) {
-  Actions.emplace_back(llvm::make_unique<Kind>(std::forward<Args>(args)...));
+  Actions.emplace_back(std::make_unique<Kind>(std::forward<Args>(args)...));
   return *static_cast<Kind *>(Actions.back().get());
 }
 
@@ -2796,7 +2838,7 @@ template <class Kind, class... Args>
 action_iterator RuleMatcher::insertAction(action_iterator InsertPt,
                                           Args &&... args) {
   return Actions.emplace(InsertPt,
-                         llvm::make_unique<Kind>(std::forward<Args>(args)...));
+                         std::make_unique<Kind>(std::forward<Args>(args)...));
 }
 
 unsigned RuleMatcher::implicitlyDefineInsnVar(InstructionMatcher &Matcher) {
@@ -3212,7 +3254,7 @@ Error
 GlobalISelEmitter::importRulePredicates(RuleMatcher &M,
                                         ArrayRef<Predicate> Predicates) {
   for (const Predicate &P : Predicates) {
-    if (!P.Def)
+    if (!P.Def || P.getCondString().empty())
       continue;
     declareSubtargetFeature(P.Def);
     M.addRequiredFeature(P.Def);
@@ -3287,6 +3329,10 @@ Expected<InstructionMatcher &> GlobalISelEmitter::createAndImportSelDAGMatcher(
             0, ParsedAddrSpaces);
         }
       }
+
+      int64_t MinAlign = Predicate.getMinAlignment();
+      if (MinAlign > 0)
+        InsnMatcher.addPredicate<MemoryAlignmentPredicateMatcher>(0, MinAlign);
     }
 
     // G_LOAD is used for both non-extending and any-extending loads.
@@ -3301,11 +3347,19 @@ Expected<InstructionMatcher &> GlobalISelEmitter::createAndImportSelDAGMatcher(
       continue;
     }
 
-    if (Predicate.isStore() && Predicate.isTruncStore()) {
-      // FIXME: If MemoryVT is set, we end up with 2 checks for the MMO size.
-      InsnMatcher.addPredicate<MemoryVsLLTSizePredicateMatcher>(
-        0, MemoryVsLLTSizePredicateMatcher::LessThan, 0);
-      continue;
+    if (Predicate.isStore()) {
+      if (Predicate.isTruncStore()) {
+        // FIXME: If MemoryVT is set, we end up with 2 checks for the MMO size.
+        InsnMatcher.addPredicate<MemoryVsLLTSizePredicateMatcher>(
+            0, MemoryVsLLTSizePredicateMatcher::LessThan, 0);
+        continue;
+      }
+      if (Predicate.isNonTruncStore()) {
+        // We need to check the sizes match here otherwise we could incorrectly
+        // match truncating stores with non-truncating ones.
+        InsnMatcher.addPredicate<MemoryVsLLTSizePredicateMatcher>(
+            0, MemoryVsLLTSizePredicateMatcher::EqualTo, 0);
+      }
     }
 
     // No check required. We already did it by swapping the opcode.
@@ -3428,6 +3482,13 @@ Expected<InstructionMatcher &> GlobalISelEmitter::createAndImportSelDAGMatcher(
     }
 
     // Match the used operands (i.e. the children of the operator).
+    bool IsIntrinsic =
+        SrcGIOrNull->TheDef->getName() == "G_INTRINSIC" ||
+        SrcGIOrNull->TheDef->getName() == "G_INTRINSIC_W_SIDE_EFFECTS";
+    const CodeGenIntrinsic *II = Src->getIntrinsicInfo(CGP);
+    if (IsIntrinsic && !II)
+      return failedImport("Expected IntInit containing intrinsic ID)");
+
     for (unsigned i = 0, e = Src->getNumChildren(); i != e; ++i) {
       TreePatternNode *SrcChild = Src->getChild(i);
 
@@ -3436,19 +3497,21 @@ Expected<InstructionMatcher &> GlobalISelEmitter::createAndImportSelDAGMatcher(
       // Coerce integers to pointers to address space 0 if the context indicates a pointer.
       bool OperandIsAPointer = SrcGIOrNull->isOperandAPointer(i);
 
-      // For G_INTRINSIC/G_INTRINSIC_W_SIDE_EFFECTS, the operand immediately
-      // following the defs is an intrinsic ID.
-      if ((SrcGIOrNull->TheDef->getName() == "G_INTRINSIC" ||
-           SrcGIOrNull->TheDef->getName() == "G_INTRINSIC_W_SIDE_EFFECTS") &&
-          i == 0) {
-        if (const CodeGenIntrinsic *II = Src->getIntrinsicInfo(CGP)) {
+      if (IsIntrinsic) {
+        // For G_INTRINSIC/G_INTRINSIC_W_SIDE_EFFECTS, the operand immediately
+        // following the defs is an intrinsic ID.
+        if (i == 0) {
           OperandMatcher &OM =
               InsnMatcher.addOperand(OpIdx++, SrcChild->getName(), TempOpIdx);
           OM.addPredicate<IntrinsicIDOperandMatcher>(II);
           continue;
         }
 
-        return failedImport("Expected IntInit containing instrinsic ID)");
+        // We have to check intrinsics for llvm_anyptr_ty parameters.
+        //
+        // Note that we have to look at the i-1th parameter, because we don't
+        // have the intrinsic ID in the intrinsic's parameter list.
+        OperandIsAPointer |= II->isParamAPointer(i - 1);
       }
 
       if (auto Error =
@@ -4235,7 +4298,7 @@ std::vector<Matcher *> GlobalISelEmitter::optimizeRules(
     std::vector<std::unique_ptr<Matcher>> &MatcherStorage) {
 
   std::vector<Matcher *> OptRules;
-  std::unique_ptr<GroupT> CurrentGroup = make_unique<GroupT>();
+  std::unique_ptr<GroupT> CurrentGroup = std::make_unique<GroupT>();
   assert(CurrentGroup->empty() && "Newly created group isn't empty!");
   unsigned NumGroups = 0;
 
@@ -4256,7 +4319,7 @@ std::vector<Matcher *> GlobalISelEmitter::optimizeRules(
       MatcherStorage.emplace_back(std::move(CurrentGroup));
       ++NumGroups;
     }
-    CurrentGroup = make_unique<GroupT>();
+    CurrentGroup = std::make_unique<GroupT>();
   };
   for (Matcher *Rule : Rules) {
     // Greedily add as many matchers as possible to the current group:
