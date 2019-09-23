@@ -389,8 +389,7 @@ define void @store(i64* %addr, i64 addrspace(42)* %addr42, i64 %val1, i64 %val2)
 ; CHECK-LABEL: name: intrinsics
 ; CHECK: [[CUR:%[0-9]+]]:_(s32) = COPY $w0
 ; CHECK: [[BITS:%[0-9]+]]:_(s32) = COPY $w1
-; CHECK: [[CREG:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-; CHECK: [[PTR:%[0-9]+]]:_(p0) = G_INTRINSIC intrinsic(@llvm.returnaddress), [[CREG]]
+; CHECK: [[PTR:%[0-9]+]]:_(p0) = G_INTRINSIC intrinsic(@llvm.returnaddress), 0
 ; CHECK: [[PTR_VEC:%[0-9]+]]:_(p0) = G_FRAME_INDEX %stack.0.ptr.vec
 ; CHECK: [[VEC:%[0-9]+]]:_(<8 x s8>) = G_LOAD [[PTR_VEC]]
 ; CHECK: G_INTRINSIC_W_SIDE_EFFECTS intrinsic(@llvm.aarch64.neon.st2), [[VEC]](<8 x s8>), [[VEC]](<8 x s8>), [[PTR]](p0)
@@ -1391,6 +1390,16 @@ define i32 @test_ctpop_intrinsic(i32 %a) {
 ; CHECK: [[RES:%[0-9]+]]:_(s32) = G_CTPOP [[A]]
 ; CHECK: $w0 = COPY [[RES]]
   %res = call i32 @llvm.ctpop.i32(i32 %a)
+  ret i32 %res
+}
+
+declare i32 @llvm.bitreverse.i32(i32)
+define i32 @test_bitreverse_intrinsic(i32 %a) {
+; CHECK-LABEL: name: test_bitreverse
+; CHECK: [[A:%[0-9]+]]:_(s32) = COPY $w0
+; CHECK: [[RES:%[0-9]+]]:_(s32) = G_BITREVERSE [[A]]
+; CHECK: $w0 = COPY [[RES]]
+  %res = call i32 @llvm.bitreverse.i32(i32 %a)
   ret i32 %res
 }
 

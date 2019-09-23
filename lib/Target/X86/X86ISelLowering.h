@@ -683,6 +683,9 @@ namespace llvm {
     bool isCalleePop(CallingConv::ID CallingConv,
                      bool is64Bit, bool IsVarArg, bool GuaranteeTCO);
 
+    /// If Op is a constant whose elements are all the same constant or
+    /// undefined, return true and return the constant value in \p SplatVal.
+    bool isConstantSplat(SDValue Op, APInt &SplatVal);
   } // end namespace X86
 
   //===--------------------------------------------------------------------===//
@@ -795,6 +798,17 @@ namespace llvm {
     /// and some i16 instructions are slow.
     bool IsDesirableToPromoteOp(SDValue Op, EVT &PVT) const override;
 
+    /// Return 1 if we can compute the negated form of the specified expression
+    /// for the same cost as the expression itself, or 2 if we can compute the
+    /// negated form more cheaply than the expression itself. Else return 0.
+    char isNegatibleForFree(SDValue Op, SelectionDAG &DAG, bool LegalOperations,
+                            bool ForCodeSize, unsigned Depth) const override;
+
+    /// If isNegatibleForFree returns true, return the newly negated expression.
+    SDValue getNegatedExpression(SDValue Op, SelectionDAG &DAG,
+                                 bool LegalOperations, bool ForCodeSize,
+                                 unsigned Depth) const override;
+
     MachineBasicBlock *
     EmitInstrWithCustomInserter(MachineInstr &MI,
                                 MachineBasicBlock *MBB) const override;
@@ -873,11 +887,7 @@ namespace llvm {
       return VTIsOk(XVT) && VTIsOk(KeptBitsVT);
     }
 
-    bool shouldExpandShift(SelectionDAG &DAG, SDNode *N) const override {
-      if (DAG.getMachineFunction().getFunction().hasMinSize())
-        return false;
-      return true;
-    }
+    bool shouldExpandShift(SelectionDAG &DAG, SDNode *N) const override;
 
     bool shouldSplatInsEltVarIndex(EVT VT) const override;
 
@@ -1104,7 +1114,7 @@ namespace llvm {
     bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                            Type *Ty) const override;
 
-    bool reduceSelectOfFPConstantLoads(bool IsFPSetCC) const override;
+    bool reduceSelectOfFPConstantLoads(EVT CmpOpVT) const override;
 
     bool convertSelectOfConstantsToMath(EVT VT) const override;
 
@@ -1203,6 +1213,10 @@ namespace llvm {
     unsigned getNumRegistersForCallingConv(LLVMContext &Context,
                                            CallingConv::ID CC,
                                            EVT VT) const override;
+
+    unsigned getVectorTypeBreakdownForCallingConv(
+        LLVMContext &Context, CallingConv::ID CC, EVT VT, EVT &IntermediateVT,
+        unsigned &NumIntermediates, MVT &RegisterVT) const override;
 
     bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
@@ -1343,6 +1357,12 @@ namespace llvm {
     SDValue LowerGC_TRANSITION_START(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGC_TRANSITION_END(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+    SDValue lowerFaddFsub(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
+
+    SDValue LowerF128Call(SDValue Op, SelectionDAG &DAG,
+                          RTLIB::Libcall Call) const;
 
     SDValue
     LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
@@ -1388,6 +1408,9 @@ namespace llvm {
 
     LoadInst *
     lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *AI) const override;
+
+    bool lowerAtomicStoreAsStoreSDNode(const StoreInst &SI) const override;
+    bool lowerAtomicLoadAsLoadSDNode(const LoadInst &LI) const override;
 
     bool needsCmpXchgNb(Type *MemType) const;
 
@@ -1479,6 +1502,9 @@ namespace llvm {
 
     /// Reassociate floating point divisions into multiply by reciprocal.
     unsigned combineRepeatedFPDivisors() const override;
+
+    SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
+                          SmallVectorImpl<SDNode *> &Created) const override;
   };
 
   namespace X86 {

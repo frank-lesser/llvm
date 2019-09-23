@@ -193,6 +193,11 @@ static cl::opt<bool> ClRecover(
     cl::desc("Enable recovery mode (continue-after-error)."),
     cl::Hidden, cl::init(false));
 
+static cl::opt<bool> ClInsertVersionCheck(
+    "asan-guard-against-version-mismatch",
+    cl::desc("Guard against compiler/runtime version mismatch."),
+    cl::Hidden, cl::init(true));
+
 // This flag may need to be replaced with -f[no-]asan-reads.
 static cl::opt<bool> ClInstrumentReads("asan-instrument-reads",
                                        cl::desc("instrument read instructions"),
@@ -716,7 +721,7 @@ public:
     GlobalsMetadata &GlobalsMD =
         getAnalysis<ASanGlobalsMetadataWrapperPass>().getGlobalsMD();
     const TargetLibraryInfo *TLI =
-        &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+        &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F);
     AddressSanitizer ASan(*F.getParent(), GlobalsMD, CompileKernel, Recover,
                           UseAfterScope);
     return ASan.instrumentFunction(F, TLI);
@@ -1043,7 +1048,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
     if (!II.isLifetimeStartOrEnd())
       return;
     // Found lifetime intrinsic, add ASan instrumentation if necessary.
-    ConstantInt *Size = dyn_cast<ConstantInt>(II.getArgOperand(0));
+    auto *Size = cast<ConstantInt>(II.getArgOperand(0));
     // If size argument is undefined, don't do anything.
     if (Size->isMinusOne()) return;
     // Check that size doesn't saturate uint64_t and can
@@ -1341,7 +1346,7 @@ Value *AddressSanitizer::isInterestingMemoryAccess(Instruction *I,
                                                    unsigned *Alignment,
                                                    Value **MaybeMask) {
   // Skip memory accesses inserted by another instrumentation.
-  if (I->getMetadata("nosanitize")) return nullptr;
+  if (I->hasMetadata("nosanitize")) return nullptr;
 
   // Do not instrument the load fetching the dynamic shadow address.
   if (LocalDynamicShadow == I)
@@ -1785,7 +1790,7 @@ void ModuleAddressSanitizer::createInitializerPoisonCalls(
     // Must have a function or null ptr.
     if (Function *F = dyn_cast<Function>(CS->getOperand(1))) {
       if (F->getName() == kAsanModuleCtorName) continue;
-      ConstantInt *Priority = dyn_cast<ConstantInt>(CS->getOperand(0));
+      auto *Priority = cast<ConstantInt>(CS->getOperand(0));
       // Don't instrument CTORs that will run before asan.module_ctor.
       if (Priority->getLimitedValue() <= GetCtorAndDtorPriority(TargetTriple))
         continue;
@@ -2426,8 +2431,9 @@ bool ModuleAddressSanitizer::instrumentModule(Module &M) {
 
   // Create a module constructor. A destructor is created lazily because not all
   // platforms, and not all modules need it.
+  std::string AsanVersion = std::to_string(GetAsanVersion(M));
   std::string VersionCheckName =
-      kAsanVersionCheckNamePrefix + std::to_string(GetAsanVersion(M));
+      ClInsertVersionCheck ? (kAsanVersionCheckNamePrefix + AsanVersion) : "";
   std::tie(AsanCtorFunction, std::ignore) = createSanitizerCtorAndInitFunctions(
       M, kAsanModuleCtorName, kAsanInitName, /*InitArgTypes=*/{},
       /*InitArgs=*/{}, VersionCheckName);
@@ -2680,7 +2686,7 @@ bool AddressSanitizer::instrumentFunction(Function &F,
         if (CS) {
           // A call inside BB.
           TempsToInstrument.clear();
-          if (CS.doesNotReturn() && !CS->getMetadata("nosanitize"))
+          if (CS.doesNotReturn() && !CS->hasMetadata("nosanitize"))
             NoReturnCalls.push_back(CS.getInstruction());
         }
         if (CallInst *CI = dyn_cast<CallInst>(&Inst))

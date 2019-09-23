@@ -220,7 +220,10 @@ enum IIT_Info {
   IIT_STRUCT7 = 39,
   IIT_STRUCT8 = 40,
   IIT_F128 = 41,
-  IIT_VEC_ELEMENT = 42
+  IIT_VEC_ELEMENT = 42,
+  IIT_SCALABLE_VEC = 43,
+  IIT_SUBDIVIDE2_ARG = 44,
+  IIT_SUBDIVIDE4_ARG = 45
 };
 
 static void EncodeFixedValueType(MVT::SimpleValueType VT,
@@ -292,6 +295,10 @@ static void EncodeFixedType(Record *R, std::vector<unsigned char> &ArgCodes,
       Sig.push_back(IIT_PTR_TO_ELT);
     else if (R->isSubClassOf("LLVMVectorElementType"))
       Sig.push_back(IIT_VEC_ELEMENT);
+    else if (R->isSubClassOf("LLVMSubdivide2VectorType"))
+      Sig.push_back(IIT_SUBDIVIDE2_ARG);
+    else if (R->isSubClassOf("LLVMSubdivide4VectorType"))
+      Sig.push_back(IIT_SUBDIVIDE4_ARG);
     else
       Sig.push_back(IIT_ARG);
     return Sig.push_back((Number << 3) | 7 /*IITDescriptor::AK_MatchType*/);
@@ -339,6 +346,8 @@ static void EncodeFixedType(Record *R, std::vector<unsigned char> &ArgCodes,
 
   if (MVT(VT).isVector()) {
     MVT VVT = VT;
+    if (VVT.isScalableVector())
+      Sig.push_back(IIT_SCALABLE_VEC);
     switch (VVT.getVectorNumElements()) {
     default: PrintFatalError("unhandled vector type width in intrinsic!");
     case 1: Sig.push_back(IIT_V1); break;

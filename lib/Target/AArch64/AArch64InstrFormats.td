@@ -685,11 +685,11 @@ def logical_imm64_not : Operand<i64> {
 
 // iXX_imm0_65535 predicates - True if the immediate is in the range [0,65535].
 let ParserMatchClass = AsmImmRange<0, 65535>, PrintMethod = "printImmHex" in {
-def i32_imm0_65535 : Operand<i32>, ImmLeaf<i32, [{
+def i32_imm0_65535 : Operand<i32>, TImmLeaf<i32, [{
   return ((uint32_t)Imm) < 65536;
 }]>;
 
-def i64_imm0_65535 : Operand<i64>, ImmLeaf<i64, [{
+def i64_imm0_65535 : Operand<i64>, TImmLeaf<i64, [{
   return ((uint64_t)Imm) < 65536;
 }]>;
 }
@@ -943,6 +943,21 @@ class arith_extended_reg32to64<ValueType Ty> : Operand<Ty>,
   let PrintMethod = "printExtendedRegister";
   let MIOperandInfo = (ops GPR32, arith_extend64);
 }
+
+def arith_extended_reg32_i32 : arith_extended_reg32<i32>;
+def gi_arith_extended_reg32_i32 :
+    GIComplexOperandMatcher<s32, "selectArithExtendedRegister">,
+    GIComplexPatternEquiv<arith_extended_reg32_i32>;
+
+def arith_extended_reg32_i64 : arith_extended_reg32<i64>;
+def gi_arith_extended_reg32_i64 :
+    GIComplexOperandMatcher<s64, "selectArithExtendedRegister">,
+    GIComplexPatternEquiv<arith_extended_reg32_i64>;
+
+def arith_extended_reg32to64_i64 : arith_extended_reg32to64<i64>;
+def gi_arith_extended_reg32to64_i64 :
+    GIComplexOperandMatcher<s64, "selectArithExtendedRegister">,
+    GIComplexPatternEquiv<arith_extended_reg32to64_i64>;
 
 // Floating-point immediate.
 def fpimm16 : Operand<f16>,
@@ -2215,11 +2230,11 @@ multiclass AddSub<bit isSub, string mnemonic, string alias,
   // Add/Subtract extended register
   let AddedComplexity = 1, hasSideEffects = 0 in {
   def Wrx : BaseAddSubEReg<isSub, 0, GPR32sp, GPR32sp,
-                           arith_extended_reg32<i32>, mnemonic, OpNode> {
+                           arith_extended_reg32_i32, mnemonic, OpNode> {
     let Inst{31} = 0;
   }
   def Xrx : BaseAddSubEReg<isSub, 0, GPR64sp, GPR64sp,
-                           arith_extended_reg32to64<i64>, mnemonic, OpNode> {
+                           arith_extended_reg32to64_i64, mnemonic, OpNode> {
     let Inst{31} = 1;
   }
   }
@@ -2289,11 +2304,11 @@ multiclass AddSubS<bit isSub, string mnemonic, SDNode OpNode, string cmp,
   // Add/Subtract extended register
   let AddedComplexity = 1 in {
   def Wrx : BaseAddSubEReg<isSub, 1, GPR32, GPR32sp,
-                           arith_extended_reg32<i32>, mnemonic, OpNode> {
+                           arith_extended_reg32_i32, mnemonic, OpNode> {
     let Inst{31} = 0;
   }
   def Xrx : BaseAddSubEReg<isSub, 1, GPR64, GPR64sp,
-                           arith_extended_reg32<i64>, mnemonic, OpNode> {
+                           arith_extended_reg32_i64, mnemonic, OpNode> {
     let Inst{31} = 1;
   }
   }
@@ -3003,6 +3018,22 @@ def ro_Xindexed16 : ComplexPattern<i64, 4, "SelectAddrModeXRO<16>", []>;
 def ro_Xindexed32 : ComplexPattern<i64, 4, "SelectAddrModeXRO<32>", []>;
 def ro_Xindexed64 : ComplexPattern<i64, 4, "SelectAddrModeXRO<64>", []>;
 def ro_Xindexed128 : ComplexPattern<i64, 4, "SelectAddrModeXRO<128>", []>;
+
+def gi_ro_Xindexed8 :
+    GIComplexOperandMatcher<s64, "selectAddrModeXRO<8>">,
+    GIComplexPatternEquiv<ro_Xindexed8>;
+def gi_ro_Xindexed16 :
+    GIComplexOperandMatcher<s64, "selectAddrModeXRO<16>">,
+    GIComplexPatternEquiv<ro_Xindexed16>;
+def gi_ro_Xindexed32 :
+    GIComplexOperandMatcher<s64, "selectAddrModeXRO<32>">,
+    GIComplexPatternEquiv<ro_Xindexed32>;
+def gi_ro_Xindexed64 :
+    GIComplexOperandMatcher<s64, "selectAddrModeXRO<64>">,
+    GIComplexPatternEquiv<ro_Xindexed64>;
+def gi_ro_Xindexed128 :
+    GIComplexOperandMatcher<s64, "selectAddrModeXRO<128>">,
+    GIComplexPatternEquiv<ro_Xindexed128>;
 
 def ro_Windexed8 : ComplexPattern<i64, 4, "SelectAddrModeWRO<8>", []>;
 def ro_Windexed16 : ComplexPattern<i64, 4, "SelectAddrModeWRO<16>", []>;

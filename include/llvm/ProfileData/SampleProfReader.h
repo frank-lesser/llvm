@@ -326,6 +326,15 @@ public:
   /// \brief Return the profile format.
   SampleProfileFormat getFormat() { return Format; }
 
+  virtual std::unique_ptr<ProfileSymbolList> getProfileSymbolList() {
+    return nullptr;
+  };
+
+  /// It includes all the names that have samples either in outline instance
+  /// or inline instance.
+  virtual std::vector<StringRef> *getNameTable() { return nullptr; }
+  virtual bool dumpSectionInfo(raw_ostream &OS = dbgs()) { return false; };
+
 protected:
   /// Map every function to its associated profile.
   ///
@@ -382,6 +391,10 @@ public:
 
   /// Read sample profiles from the associated file.
   std::error_code read() override;
+
+  /// It includes all the names that have samples either in outline instance
+  /// or inline instance.
+  virtual std::vector<StringRef> *getNameTable() override { return &NameTable; }
 
 protected:
   /// Read a numeric value of type T from the profile.
@@ -477,10 +490,13 @@ public:
 class SampleProfileReaderExtBinaryBase : public SampleProfileReaderBinary {
 protected:
   std::vector<SecHdrTableEntry> SecHdrTable;
+  std::unique_ptr<ProfileSymbolList> ProfSymList;
   std::error_code readSecHdrTableEntry();
   std::error_code readSecHdrTable();
   virtual std::error_code readHeader() override;
-  virtual std::error_code verifySPMagic(uint64_t Magic) = 0;
+  virtual std::error_code verifySPMagic(uint64_t Magic) override = 0;
+  virtual std::error_code readOneSection(const uint8_t *Start, uint64_t Size,
+                                         SecType Type) = 0;
 
 public:
   SampleProfileReaderExtBinaryBase(std::unique_ptr<MemoryBuffer> B,
@@ -489,11 +505,20 @@ public:
 
   /// Read sample profiles in extensible format from the associated file.
   std::error_code read() override;
+
+  /// Get the total size of all \p Type sections.
+  uint64_t getSectionSize(SecType Type);
+  /// Get the total size of header and all sections.
+  uint64_t getFileSize();
+  virtual bool dumpSectionInfo(raw_ostream &OS = dbgs()) override;
 };
 
 class SampleProfileReaderExtBinary : public SampleProfileReaderExtBinaryBase {
 private:
   virtual std::error_code verifySPMagic(uint64_t Magic) override;
+  virtual std::error_code readOneSection(const uint8_t *Start, uint64_t Size,
+                                         SecType Type) override;
+  std::error_code readProfileSymbolList();
 
 public:
   SampleProfileReaderExtBinary(std::unique_ptr<MemoryBuffer> B, LLVMContext &C,
@@ -502,6 +527,10 @@ public:
 
   /// \brief Return true if \p Buffer is in the format supported by this class.
   static bool hasFormat(const MemoryBuffer &Buffer);
+
+  virtual std::unique_ptr<ProfileSymbolList> getProfileSymbolList() override {
+    return std::move(ProfSymList);
+  };
 };
 
 class SampleProfileReaderCompactBinary : public SampleProfileReaderBinary {

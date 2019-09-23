@@ -56,6 +56,8 @@ public:
   static ErrorOr<std::unique_ptr<SampleProfileWriter>>
   create(std::unique_ptr<raw_ostream> &OS, SampleProfileFormat Format);
 
+  virtual void setProfileSymbolList(ProfileSymbolList *PSL) {}
+
 protected:
   SampleProfileWriter(std::unique_ptr<raw_ostream> &OS)
       : OutputStream(std::move(OS)) {}
@@ -109,12 +111,12 @@ private:
 /// Sample-based profile writer (binary format).
 class SampleProfileWriterBinary : public SampleProfileWriter {
 public:
-  virtual std::error_code writeSample(const FunctionSamples &S) override;
-
-protected:
   SampleProfileWriterBinary(std::unique_ptr<raw_ostream> &OS)
       : SampleProfileWriter(OS) {}
 
+  virtual std::error_code writeSample(const FunctionSamples &S) override;
+
+protected:
   virtual std::error_code writeMagicIdent(SampleProfileFormat Format);
   virtual std::error_code writeNameTable();
   virtual std::error_code
@@ -175,12 +177,19 @@ private:
 class SampleProfileWriterExtBinary : public SampleProfileWriterExtBinaryBase {
   using SampleProfileWriterExtBinaryBase::SampleProfileWriterExtBinaryBase;
 
+public:
+  virtual void setProfileSymbolList(ProfileSymbolList *PSL) override {
+    ProfSymList = PSL;
+  };
+
 private:
-  virtual void initSectionLayout() {
-    SectionLayout = {SecProfSummary, SecNameTable, SecLBRProfile};
+  virtual void initSectionLayout() override {
+    SectionLayout = {SecProfSummary, SecNameTable, SecLBRProfile,
+                     SecProfileSymbolList};
   };
   virtual std::error_code
   writeSections(const StringMap<FunctionSamples> &ProfileMap) override;
+  ProfileSymbolList *ProfSymList = nullptr;
 };
 
 // CompactBinary is a compact format of binary profile which both reduces

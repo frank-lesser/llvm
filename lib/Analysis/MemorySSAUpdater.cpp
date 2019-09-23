@@ -255,12 +255,12 @@ void MemorySSAUpdater::insertUse(MemoryUse *MU, bool RenameUses) {
         FirstDef = MD->getDefiningAccess();
 
       MSSA->renamePass(MU->getBlock(), FirstDef, Visited);
-      // We just inserted a phi into this block, so the incoming value will
-      // become the phi anyway, so it does not matter what we pass.
-      for (auto &MP : InsertedPHIs)
-        if (MemoryPhi *Phi = cast_or_null<MemoryPhi>(MP))
-          MSSA->renamePass(Phi->getBlock(), nullptr, Visited);
     }
+    // We just inserted a phi into this block, so the incoming value will
+    // become the phi anyway, so it does not matter what we pass.
+    for (auto &MP : InsertedPHIs)
+      if (MemoryPhi *Phi = cast_or_null<MemoryPhi>(MP))
+        MSSA->renamePass(Phi->getBlock(), nullptr, Visited);
   }
 }
 
@@ -339,6 +339,9 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
       ForwardIDFCalculator IDFs(*MSSA->DT);
       SmallVector<BasicBlock *, 32> IDFBlocks;
       SmallPtrSet<BasicBlock *, 2> DefiningBlocks;
+      for (const auto &VH : InsertedPHIs)
+        if (const auto *RealPHI = cast_or_null<MemoryPhi>(VH))
+          DefiningBlocks.insert(RealPHI->getBlock());
       DefiningBlocks.insert(MD->getBlock());
       IDFs.setDefiningBlocks(DefiningBlocks);
       IDFs.calculate(IDFBlocks);

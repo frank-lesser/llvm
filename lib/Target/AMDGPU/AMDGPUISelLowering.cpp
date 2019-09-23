@@ -134,7 +134,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::i32, Expand);
   }
 
-  for (MVT VT : MVT::integer_vector_valuetypes()) {
+  for (MVT VT : MVT::integer_fixedlen_vector_valuetypes()) {
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::v2i8, Expand);
     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::v2i8, Expand);
     setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::v2i8, Expand);
@@ -506,6 +506,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::FABS);
   setTargetDAGCombine(ISD::AssertZext);
   setTargetDAGCombine(ISD::AssertSext);
+  setTargetDAGCombine(ISD::INTRINSIC_WO_CHAIN);
 }
 
 //===----------------------------------------------------------------------===//
@@ -717,9 +718,8 @@ bool AMDGPUTargetLowering::isSDNodeAlwaysUniform(const SDNode * N) const {
     break;
     case ISD::LOAD:
     {
-      const LoadSDNode * L = dyn_cast<LoadSDNode>(N);
-      if (L->getMemOperand()->getAddrSpace()
-      == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
+      if (cast<LoadSDNode>(N)->getMemOperand()->getAddrSpace() ==
+          AMDGPUAS::CONSTANT_ADDRESS_32BIT)
         return true;
       return false;
     }
@@ -1171,7 +1171,7 @@ void AMDGPUTargetLowering::ReplaceNodeResults(SDNode *N,
   }
 }
 
-static bool hasDefinedInitializer(const GlobalValue *GV) {
+bool AMDGPUTargetLowering::hasDefinedInitializer(const GlobalValue *GV) {
   const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV);
   if (!GVar || !GVar->hasInitializer())
     return false;
@@ -2771,8 +2771,16 @@ static bool isI24(SDValue Op, SelectionDAG &DAG) {
 static SDValue simplifyI24(SDNode *Node24,
                            TargetLowering::DAGCombinerInfo &DCI) {
   SelectionDAG &DAG = DCI.DAG;
-  SDValue LHS = Node24->getOperand(0);
-  SDValue RHS = Node24->getOperand(1);
+  bool IsIntrin = Node24->getOpcode() == ISD::INTRINSIC_WO_CHAIN;
+
+  SDValue LHS = IsIntrin ? Node24->getOperand(1) : Node24->getOperand(0);
+  SDValue RHS = IsIntrin ? Node24->getOperand(2) : Node24->getOperand(1);
+  unsigned NewOpcode = Node24->getOpcode();
+  if (IsIntrin) {
+    unsigned IID = cast<ConstantSDNode>(Node24->getOperand(0))->getZExtValue();
+    NewOpcode = IID == Intrinsic::amdgcn_mul_i24 ?
+      AMDGPUISD::MUL_I24 : AMDGPUISD::MUL_U24;
+  }
 
   APInt Demanded = APInt::getLowBitsSet(LHS.getValueSizeInBits(), 24);
 
@@ -2782,7 +2790,7 @@ static SDValue simplifyI24(SDNode *Node24,
   SDValue DemandedLHS = DAG.GetDemandedBits(LHS, Demanded);
   SDValue DemandedRHS = DAG.GetDemandedBits(RHS, Demanded);
   if (DemandedLHS || DemandedRHS)
-    return DAG.getNode(Node24->getOpcode(), SDLoc(Node24), Node24->getVTList(),
+    return DAG.getNode(NewOpcode, SDLoc(Node24), Node24->getVTList(),
                        DemandedLHS ? DemandedLHS : LHS,
                        DemandedRHS ? DemandedRHS : RHS);
 
@@ -3020,6 +3028,19 @@ SDValue AMDGPUTargetLowering::performAssertSZExtCombine(SDNode *N,
 
   return SDValue();
 }
+
+SDValue AMDGPUTargetLowering::performIntrinsicWOChainCombine(
+  SDNode *N, DAGCombinerInfo &DCI) const {
+  unsigned IID = cast<ConstantSDNode>(N->getOperand(0))->getZExtValue();
+  switch (IID) {
+  case Intrinsic::amdgcn_mul_i24:
+  case Intrinsic::amdgcn_mul_u24:
+    return simplifyI24(N, DCI);
+  default:
+    return SDValue();
+  }
+}
+
 /// Split the 64-bit value \p LHS into two 32-bit components, and perform the
 /// binary operation \p Opc to it with the corresponding constant operands.
 SDValue AMDGPUTargetLowering::splitBinaryBitConstantOpImpl(
@@ -4108,6 +4129,8 @@ SDValue AMDGPUTargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::AssertZext:
   case ISD::AssertSext:
     return performAssertSZExtCombine(N, DCI);
+  case ISD::INTRINSIC_WO_CHAIN:
+    return performIntrinsicWOChainCombine(N, DCI);
   }
   return SDValue();
 }
@@ -4138,14 +4161,28 @@ SDValue AMDGPUTargetLowering::CreateLiveInRegister(SelectionDAG &DAG,
   return DAG.getCopyFromReg(DAG.getEntryNode(), SL, VReg, VT);
 }
 
+// This may be called multiple times, and nothing prevents creating multiple
+// objects at the same offset. See if we already defined this object.
+static int getOrCreateFixedStackObject(MachineFrameInfo &MFI, unsigned Size,
+                                       int64_t Offset) {
+  for (int I = MFI.getObjectIndexBegin(); I < 0; ++I) {
+    if (MFI.getObjectOffset(I) == Offset) {
+      assert(MFI.getObjectSize(I) == Size);
+      return I;
+    }
+  }
+
+  return MFI.CreateFixedObject(Size, Offset, true);
+}
+
 SDValue AMDGPUTargetLowering::loadStackInputValue(SelectionDAG &DAG,
                                                   EVT VT,
                                                   const SDLoc &SL,
                                                   int64_t Offset) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo &MFI = MF.getFrameInfo();
+  int FI = getOrCreateFixedStackObject(MFI, VT.getStoreSize(), Offset);
 
-  int FI = MFI.CreateFixedObject(VT.getStoreSize(), Offset, true);
   auto SrcPtrInfo = MachinePointerInfo::getStack(MF, Offset);
   SDValue Ptr = DAG.getFrameIndex(FI, MVT::i32);
 
@@ -4313,10 +4350,6 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(KILL)
   NODE_NAME_CASE(DUMMY_CHAIN)
   case AMDGPUISD::FIRST_MEM_OPCODE_NUMBER: break;
-  NODE_NAME_CASE(INIT_EXEC)
-  NODE_NAME_CASE(INIT_EXEC_FROM_INPUT)
-  NODE_NAME_CASE(SENDMSG)
-  NODE_NAME_CASE(SENDMSGHALT)
   NODE_NAME_CASE(INTERP_MOV)
   NODE_NAME_CASE(INTERP_P1)
   NODE_NAME_CASE(INTERP_P2)

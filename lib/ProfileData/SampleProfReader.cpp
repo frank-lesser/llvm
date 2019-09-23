@@ -467,6 +467,59 @@ std::error_code SampleProfileReaderBinary::read() {
   return sampleprof_error::success;
 }
 
+std::error_code
+SampleProfileReaderExtBinary::readOneSection(const uint8_t *Start,
+                                             uint64_t Size, SecType Type) {
+  Data = Start;
+  switch (Type) {
+  case SecProfSummary:
+    if (std::error_code EC = readSummary())
+      return EC;
+    break;
+  case SecNameTable:
+    if (std::error_code EC = readNameTable())
+      return EC;
+    break;
+  case SecLBRProfile:
+    while (Data < Start + Size) {
+      if (std::error_code EC = readFuncProfile())
+        return EC;
+    }
+    break;
+  case SecProfileSymbolList:
+    if (std::error_code EC = readProfileSymbolList())
+      return EC;
+    break;
+  default:
+    break;
+  }
+  return sampleprof_error::success;
+}
+
+std::error_code SampleProfileReaderExtBinary::readProfileSymbolList() {
+  auto UncompressSize = readNumber<uint64_t>();
+  if (std::error_code EC = UncompressSize.getError())
+    return EC;
+
+  auto CompressSize = readNumber<uint64_t>();
+  if (std::error_code EC = CompressSize.getError())
+    return EC;
+
+  if (!ProfSymList)
+    ProfSymList = std::make_unique<ProfileSymbolList>();
+
+  if (std::error_code EC =
+          ProfSymList->read(*CompressSize, *UncompressSize, Data))
+    return EC;
+
+  // CompressSize is zero only when ProfileSymbolList is not compressed.
+  if (*CompressSize == 0)
+    Data = Data + *UncompressSize;
+  else
+    Data = Data + *CompressSize;
+  return sampleprof_error::success;
+}
+
 std::error_code SampleProfileReaderExtBinaryBase::read() {
   const uint8_t *BufStart =
       reinterpret_cast<const uint8_t *>(Buffer->getBufferStart());
@@ -475,26 +528,10 @@ std::error_code SampleProfileReaderExtBinaryBase::read() {
     // Skip empty section.
     if (!Entry.Size)
       continue;
-    Data = BufStart + Entry.Offset;
-    switch (Entry.Type) {
-    case SecProfSummary:
-      if (std::error_code EC = readSummary())
-        return EC;
-      break;
-    case SecNameTable:
-      if (std::error_code EC = readNameTable())
-        return EC;
-      break;
-    case SecLBRProfile:
-      while (Data < BufStart + Entry.Offset + Entry.Size) {
-        if (std::error_code EC = readFuncProfile())
-          return EC;
-      }
-      break;
-    default:
-      continue;
-    }
-    if (Data != BufStart + Entry.Offset + Entry.Size)
+    const uint8_t *SecStart = BufStart + Entry.Offset;
+    if (std::error_code EC = readOneSection(SecStart, Entry.Size, Entry.Type))
+      return EC;
+    if (Data != SecStart + Entry.Size)
       return sampleprof_error::malformed;
   }
 
@@ -628,6 +665,36 @@ std::error_code SampleProfileReaderExtBinaryBase::readHeader() {
     return EC;
 
   return sampleprof_error::success;
+}
+
+uint64_t SampleProfileReaderExtBinaryBase::getSectionSize(SecType Type) {
+  for (auto &Entry : SecHdrTable) {
+    if (Entry.Type == Type)
+      return Entry.Size;
+  }
+  return 0;
+}
+
+uint64_t SampleProfileReaderExtBinaryBase::getFileSize() {
+  auto &LastEntry = SecHdrTable.back();
+  return LastEntry.Offset + LastEntry.Size;
+}
+
+bool SampleProfileReaderExtBinaryBase::dumpSectionInfo(raw_ostream &OS) {
+  uint64_t TotalSecsSize = 0;
+  for (auto &Entry : SecHdrTable) {
+    OS << getSecName(Entry.Type) << " - Offset: " << Entry.Offset
+       << ", Size: " << Entry.Size << "\n";
+    TotalSecsSize += getSectionSize(Entry.Type);
+  }
+  uint64_t HeaderSize = SecHdrTable.front().Offset;
+  assert(HeaderSize + TotalSecsSize == getFileSize() &&
+         "Size of 'header + sections' doesn't match the total size of profile");
+
+  OS << "Header Size: " << HeaderSize << "\n";
+  OS << "Total Sections Size: " << TotalSecsSize << "\n";
+  OS << "File Size: " << getFileSize() << "\n";
+  return true;
 }
 
 std::error_code SampleProfileReaderBinary::readMagicIdent() {
