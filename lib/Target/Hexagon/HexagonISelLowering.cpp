@@ -240,12 +240,12 @@ bool HexagonTargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
   return true;
 }
 
-unsigned  HexagonTargetLowering::getRegisterByName(const char* RegName, EVT VT,
-                                              SelectionDAG &DAG) const {
+Register HexagonTargetLowering::getRegisterByName(const char* RegName, EVT VT,
+                                                  const MachineFunction &) const {
   // Just support r19, the linux kernel uses it.
-  unsigned Reg = StringSwitch<unsigned>(RegName)
+  Register Reg = StringSwitch<Register>(RegName)
                      .Case("r19", Hexagon::R19)
-                     .Default(0);
+                     .Default(Register());
   if (Reg)
     return Reg;
 
@@ -1235,9 +1235,9 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
       Subtarget(ST) {
   auto &HRI = *Subtarget.getRegisterInfo();
 
-  setPrefLoopAlignment(llvm::Align(16));
-  setMinFunctionAlignment(llvm::Align(4));
-  setPrefFunctionAlignment(llvm::Align(16));
+  setPrefLoopAlignment(Align(16));
+  setMinFunctionAlignment(Align(4));
+  setPrefFunctionAlignment(Align(16));
   setStackPointerRegisterToSaveRestore(HRI.getStackRegister());
   setBooleanContents(TargetLoweringBase::UndefinedBooleanContent);
   setBooleanVectorContents(TargetLoweringBase::UndefinedBooleanContent);
@@ -2673,7 +2673,8 @@ HexagonTargetLowering::LowerUnalignedLoad(SDValue Op, SelectionDAG &DAG)
     DoDefault = true;
 
   if (!AlignLoads) {
-    if (allowsMemoryAccess(Ctx, DL, LN->getMemoryVT(), *LN->getMemOperand()))
+    if (allowsMemoryAccessForAlignment(Ctx, DL, LN->getMemoryVT(),
+                                       *LN->getMemOperand()))
       return Op;
     DoDefault = true;
   }
@@ -2681,7 +2682,8 @@ HexagonTargetLowering::LowerUnalignedLoad(SDValue Op, SelectionDAG &DAG)
     // The PartTy is the equivalent of "getLoadableTypeOfSize(HaveAlign)".
     MVT PartTy = HaveAlign <= 8 ? MVT::getIntegerVT(8 * HaveAlign)
                                 : MVT::getVectorVT(MVT::i8, HaveAlign);
-    DoDefault = allowsMemoryAccess(Ctx, DL, PartTy, *LN->getMemOperand());
+    DoDefault =
+        allowsMemoryAccessForAlignment(Ctx, DL, PartTy, *LN->getMemOperand());
   }
   if (DoDefault) {
     std::pair<SDValue, SDValue> P = expandUnalignedLoad(LN, DAG);

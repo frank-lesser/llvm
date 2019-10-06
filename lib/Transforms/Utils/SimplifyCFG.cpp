@@ -632,8 +632,7 @@ private:
   /// vector.
   /// One "Extra" case is allowed to differ from the other.
   void gather(Value *V) {
-    Instruction *I = dyn_cast<Instruction>(V);
-    bool isEQ = (I->getOpcode() == Instruction::Or);
+    bool isEQ = (cast<Instruction>(V)->getOpcode() == Instruction::Or);
 
     // Keep a stack (SmallVector for efficiency) for depth-first traversal
     SmallVector<Value *, 8> DFT;
@@ -2401,6 +2400,7 @@ static bool FoldTwoEntryPHINode(PHINode *PN, const TargetTransformInfo &TTI,
         return false;
       }
   }
+  assert(DomBlock && "Failed to find root DomBlock");
 
   LLVM_DEBUG(dbgs() << "FOUND IF CONDITION!  " << *IfCond
                     << "  T: " << IfTrue->getName()
@@ -3087,15 +3087,15 @@ static bool mergeConditionalStoreToAddress(BasicBlock *PTB, BasicBlock *PFB,
   // store that doesn't execute.
   if (MinAlignment != 0) {
     // Choose the minimum of all non-zero alignments.
-    SI->setAlignment(MinAlignment);
+    SI->setAlignment(Align(MinAlignment));
   } else if (MaxAlignment != 0) {
     // Choose the minimal alignment between the non-zero alignment and the ABI
     // default alignment for the type of the stored value.
-    SI->setAlignment(std::min(MaxAlignment, TypeAlignment));
+    SI->setAlignment(Align(std::min(MaxAlignment, TypeAlignment)));
   } else {
     // If both alignments are zero, use ABI default alignment for the type of
     // the stored value.
-    SI->setAlignment(TypeAlignment);
+    SI->setAlignment(Align(TypeAlignment));
   }
 
   QStore->eraseFromParent();
@@ -3897,7 +3897,7 @@ bool SimplifyCFGOpt::SimplifyCommonResume(ResumeInst *RI) {
 // Simplify resume that is only used by a single (non-phi) landing pad.
 bool SimplifyCFGOpt::SimplifySingleResume(ResumeInst *RI) {
   BasicBlock *BB = RI->getParent();
-  LandingPadInst *LPInst = dyn_cast<LandingPadInst>(BB->getFirstNonPHI());
+  auto *LPInst = cast<LandingPadInst>(BB->getFirstNonPHI());
   assert(RI->getValue() == LPInst &&
          "Resume must unwind the exception that caused control to here");
 

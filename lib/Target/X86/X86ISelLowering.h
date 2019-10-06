@@ -425,7 +425,8 @@ namespace llvm {
       // Tests Types Of a FP Values for scalar types.
       VFPCLASSS,
 
-      // Broadcast scalar to vector.
+      // Broadcast (splat) scalar or element 0 of a vector. If the operand is
+      // a vector, this node may change the vector length as part of the splat.
       VBROADCAST,
       // Broadcast mask to vector.
       VBROADCASTM,
@@ -614,6 +615,9 @@ namespace llvm {
       // extract_vector_elt, store.
       VEXTRACT_STORE,
 
+      // scalar broadcast from memory
+      VBROADCAST_LOAD,
+
       // Store FP control world into i16 memory.
       FNSTCW16m,
 
@@ -797,17 +801,6 @@ namespace llvm {
     /// i16 is legal, but undesirable since i16 instruction encodings are longer
     /// and some i16 instructions are slow.
     bool IsDesirableToPromoteOp(SDValue Op, EVT &PVT) const override;
-
-    /// Return 1 if we can compute the negated form of the specified expression
-    /// for the same cost as the expression itself, or 2 if we can compute the
-    /// negated form more cheaply than the expression itself. Else return 0.
-    char isNegatibleForFree(SDValue Op, SelectionDAG &DAG, bool LegalOperations,
-                            bool ForCodeSize, unsigned Depth) const override;
-
-    /// If isNegatibleForFree returns true, return the newly negated expression.
-    SDValue getNegatedExpression(SDValue Op, SelectionDAG &DAG,
-                                 bool LegalOperations, bool ForCodeSize,
-                                 unsigned Depth) const override;
 
     MachineBasicBlock *
     EmitInstrWithCustomInserter(MachineInstr &MI,
@@ -1161,8 +1154,8 @@ namespace llvm {
       return nullptr; // nothing to do, move along.
     }
 
-    unsigned getRegisterByName(const char* RegName, EVT VT,
-                               SelectionDAG &DAG) const override;
+    Register getRegisterByName(const char* RegName, EVT VT,
+                               const MachineFunction &MF) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.

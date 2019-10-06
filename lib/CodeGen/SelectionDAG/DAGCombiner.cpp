@@ -540,11 +540,11 @@ namespace {
     SDValue MatchBSwapHWordLow(SDNode *N, SDValue N0, SDValue N1,
                                bool DemandHighBits = true);
     SDValue MatchBSwapHWord(SDNode *N, SDValue N0, SDValue N1);
-    SDNode *MatchRotatePosNeg(SDValue Shifted, SDValue Pos, SDValue Neg,
+    SDValue MatchRotatePosNeg(SDValue Shifted, SDValue Pos, SDValue Neg,
                               SDValue InnerPos, SDValue InnerNeg,
                               unsigned PosOpcode, unsigned NegOpcode,
                               const SDLoc &DL);
-    SDNode *MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL);
+    SDValue MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL);
     SDValue MatchLoadCombine(SDNode *N);
     SDValue MatchStoreCombine(StoreSDNode *N);
     SDValue ReduceLoadWidth(SDNode *N);
@@ -4706,7 +4706,7 @@ bool DAGCombiner::isLegalNarrowLdSt(LSBaseSDNode *LDST,
   if (LDST->getMemoryVT().getSizeInBits() < MemVT.getSizeInBits())
     return false;
 
-  // Ensure that this isn't going to produce an unsupported unaligned access.
+  // Ensure that this isn't going to produce an unsupported memory access.
   if (ShAmt &&
       !TLI.allowsMemoryAccess(*DAG.getContext(), DAG.getDataLayout(), MemVT,
                               LDST->getAddressSpace(), ShAmt / 8,
@@ -5517,6 +5517,23 @@ static bool isBSwapHWordElement(SDValue N, MutableArrayRef<SDNode *> Parts) {
   return true;
 }
 
+// Match 2 elements of a packed halfword bswap.
+static bool isBSwapHWordPair(SDValue N, MutableArrayRef<SDNode *> Parts) {
+  if (N.getOpcode() == ISD::OR)
+    return isBSwapHWordElement(N.getOperand(0), Parts) &&
+           isBSwapHWordElement(N.getOperand(1), Parts);
+
+  if (N.getOpcode() == ISD::SRL && N.getOperand(0).getOpcode() == ISD::BSWAP) {
+    ConstantSDNode *C = isConstOrConstSplat(N.getOperand(1));
+    if (!C || C->getAPIntValue() != 16)
+      return false;
+    Parts[0] = Parts[1] = N.getOperand(0).getOperand(0).getNode();
+    return true;
+  }
+
+  return false;
+}
+
 /// Match a 32-bit packed halfword bswap. That is
 /// ((x & 0x000000ff) << 8) |
 /// ((x & 0x0000ff00) >> 8) |
@@ -5534,43 +5551,26 @@ SDValue DAGCombiner::MatchBSwapHWord(SDNode *N, SDValue N0, SDValue N1) {
     return SDValue();
 
   // Look for either
-  // (or (or (and), (and)), (or (and), (and)))
-  // (or (or (or (and), (and)), (and)), (and))
-  if (N0.getOpcode() != ISD::OR)
-    return SDValue();
-  SDValue N00 = N0.getOperand(0);
-  SDValue N01 = N0.getOperand(1);
+  // (or (bswaphpair), (bswaphpair))
+  // (or (or (bswaphpair), (and)), (and))
+  // (or (or (and), (bswaphpair)), (and))
   SDNode *Parts[4] = {};
 
-  if (N1.getOpcode() == ISD::OR &&
-      N00.getNumOperands() == 2 && N01.getNumOperands() == 2) {
+  if (isBSwapHWordPair(N0, Parts)) {
     // (or (or (and), (and)), (or (and), (and)))
-    if (!isBSwapHWordElement(N00, Parts))
+    if (!isBSwapHWordPair(N1, Parts))
       return SDValue();
-
-    if (!isBSwapHWordElement(N01, Parts))
-      return SDValue();
-    SDValue N10 = N1.getOperand(0);
-    if (!isBSwapHWordElement(N10, Parts))
-      return SDValue();
-    SDValue N11 = N1.getOperand(1);
-    if (!isBSwapHWordElement(N11, Parts))
-      return SDValue();
-  } else {
+  } else if (N0.getOpcode() != ISD::OR) {
     // (or (or (or (and), (and)), (and)), (and))
     if (!isBSwapHWordElement(N1, Parts))
       return SDValue();
-    if (!isBSwapHWordElement(N01, Parts))
+    SDValue N00 = N0.getOperand(0);
+    SDValue N01 = N0.getOperand(1);
+    if (!(isBSwapHWordElement(N01, Parts) && isBSwapHWordPair(N00, Parts)) &&
+        !(isBSwapHWordElement(N00, Parts) && isBSwapHWordPair(N01, Parts)))
       return SDValue();
-    if (N00.getOpcode() != ISD::OR)
-      return SDValue();
-    SDValue N000 = N00.getOperand(0);
-    if (!isBSwapHWordElement(N000, Parts))
-      return SDValue();
-    SDValue N001 = N00.getOperand(1);
-    if (!isBSwapHWordElement(N001, Parts))
-      return SDValue();
-  }
+  } else
+    return SDValue();
 
   // Make sure the parts are all coming from the same node.
   if (Parts[0] != Parts[1] || Parts[0] != Parts[2] || Parts[0] != Parts[3])
@@ -5816,8 +5816,8 @@ SDValue DAGCombiner::visitOR(SDNode *N) {
       return V;
 
   // See if this is some rotate idiom.
-  if (SDNode *Rot = MatchRotate(N0, N1, SDLoc(N)))
-    return SDValue(Rot, 0);
+  if (SDValue Rot = MatchRotate(N0, N1, SDLoc(N)))
+    return Rot;
 
   if (SDValue Load = MatchLoadCombine(N))
     return Load;
@@ -6102,7 +6102,7 @@ static bool matchRotateSub(SDValue Pos, SDValue Neg, unsigned EltSize,
 // to both (PosOpcode Shifted, Pos) and (NegOpcode Shifted, Neg), with the
 // former being preferred if supported.  InnerPos and InnerNeg are Pos and
 // Neg with outer conversions stripped away.
-SDNode *DAGCombiner::MatchRotatePosNeg(SDValue Shifted, SDValue Pos,
+SDValue DAGCombiner::MatchRotatePosNeg(SDValue Shifted, SDValue Pos,
                                        SDValue Neg, SDValue InnerPos,
                                        SDValue InnerNeg, unsigned PosOpcode,
                                        unsigned NegOpcode, const SDLoc &DL) {
@@ -6117,32 +6117,33 @@ SDNode *DAGCombiner::MatchRotatePosNeg(SDValue Shifted, SDValue Pos,
   if (matchRotateSub(InnerPos, InnerNeg, VT.getScalarSizeInBits(), DAG)) {
     bool HasPos = TLI.isOperationLegalOrCustom(PosOpcode, VT);
     return DAG.getNode(HasPos ? PosOpcode : NegOpcode, DL, VT, Shifted,
-                       HasPos ? Pos : Neg).getNode();
+                       HasPos ? Pos : Neg);
   }
 
-  return nullptr;
+  return SDValue();
 }
 
 // MatchRotate - Handle an 'or' of two operands.  If this is one of the many
 // idioms for rotate, and if the target supports rotation instructions, generate
 // a rot[lr].
-SDNode *DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
+SDValue DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
   // Must be a legal type.  Expanded 'n promoted things won't work with rotates.
   EVT VT = LHS.getValueType();
-  if (!TLI.isTypeLegal(VT)) return nullptr;
+  if (!TLI.isTypeLegal(VT))
+    return SDValue();
 
   // The target must have at least one rotate flavor.
   bool HasROTL = hasOperation(ISD::ROTL, VT);
   bool HasROTR = hasOperation(ISD::ROTR, VT);
-  if (!HasROTL && !HasROTR) return nullptr;
+  if (!HasROTL && !HasROTR)
+    return SDValue();
 
   // Check for truncated rotate.
   if (LHS.getOpcode() == ISD::TRUNCATE && RHS.getOpcode() == ISD::TRUNCATE &&
       LHS.getOperand(0).getValueType() == RHS.getOperand(0).getValueType()) {
     assert(LHS.getValueType() == RHS.getValueType());
-    if (SDNode *Rot = MatchRotate(LHS.getOperand(0), RHS.getOperand(0), DL)) {
-      return DAG.getNode(ISD::TRUNCATE, SDLoc(LHS), LHS.getValueType(),
-                         SDValue(Rot, 0)).getNode();
+    if (SDValue Rot = MatchRotate(LHS.getOperand(0), RHS.getOperand(0), DL)) {
+      return DAG.getNode(ISD::TRUNCATE, SDLoc(LHS), LHS.getValueType(), Rot);
     }
   }
 
@@ -6157,7 +6158,7 @@ SDNode *DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
 
   // If neither side matched a rotate half, bail
   if (!LHSShift && !RHSShift)
-    return nullptr;
+    return SDValue();
 
   // InstCombine may have combined a constant shl, srl, mul, or udiv with one
   // side of the rotate, so try to handle that here. In all cases we need to
@@ -6180,15 +6181,15 @@ SDNode *DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
 
   // If a side is still missing, nothing else we can do.
   if (!RHSShift || !LHSShift)
-    return nullptr;
+    return SDValue();
 
   // At this point we've matched or extracted a shift op on each side.
 
   if (LHSShift.getOperand(0) != RHSShift.getOperand(0))
-    return nullptr;   // Not shifting the same value.
+    return SDValue(); // Not shifting the same value.
 
   if (LHSShift.getOpcode() == RHSShift.getOpcode())
-    return nullptr;   // Shifts must disagree.
+    return SDValue(); // Shifts must disagree.
 
   // Canonicalize shl to left side in a shl/srl pair.
   if (RHSShift.getOpcode() == ISD::SHL) {
@@ -6232,13 +6233,13 @@ SDNode *DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
       Rot = DAG.getNode(ISD::AND, DL, VT, Rot, Mask);
     }
 
-    return Rot.getNode();
+    return Rot;
   }
 
   // If there is a mask here, and we have a variable shift, we can't be sure
   // that we're masking out the right stuff.
   if (LHSMask.getNode() || RHSMask.getNode())
-    return nullptr;
+    return SDValue();
 
   // If the shift amount is sign/zext/any-extended just peel it off.
   SDValue LExtOp0 = LHSShiftAmt;
@@ -6255,17 +6256,17 @@ SDNode *DAGCombiner::MatchRotate(SDValue LHS, SDValue RHS, const SDLoc &DL) {
     RExtOp0 = RHSShiftAmt.getOperand(0);
   }
 
-  SDNode *TryL = MatchRotatePosNeg(LHSShiftArg, LHSShiftAmt, RHSShiftAmt,
+  SDValue TryL = MatchRotatePosNeg(LHSShiftArg, LHSShiftAmt, RHSShiftAmt,
                                    LExtOp0, RExtOp0, ISD::ROTL, ISD::ROTR, DL);
   if (TryL)
     return TryL;
 
-  SDNode *TryR = MatchRotatePosNeg(RHSShiftArg, RHSShiftAmt, LHSShiftAmt,
+  SDValue TryR = MatchRotatePosNeg(RHSShiftArg, RHSShiftAmt, LHSShiftAmt,
                                    RExtOp0, LExtOp0, ISD::ROTR, ISD::ROTL, DL);
   if (TryR)
     return TryR;
 
-  return nullptr;
+  return SDValue();
 }
 
 namespace {
@@ -18746,7 +18747,7 @@ SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   // build_vector.
   if (SVN->isSplat() && SVN->getSplatIndex() < (int)NumElts) {
     int SplatIndex = SVN->getSplatIndex();
-    if (TLI.isExtractVecEltCheap(VT, SplatIndex) &&
+    if (N0.hasOneUse() && TLI.isExtractVecEltCheap(VT, SplatIndex) &&
         TLI.isBinOp(N0.getOpcode()) && N0.getNode()->getNumValues() == 1) {
       // splat (vector_bo L, R), Index -->
       // splat (scalar_bo (extelt L, Index), (extelt R, Index))
@@ -19910,8 +19911,13 @@ SDValue DAGCombiner::SimplifySelectCC(const SDLoc &DL, SDValue N0, SDValue N1,
   // when the condition can be materialized as an all-ones register.  Any
   // single bit-test can be materialized as an all-ones register with
   // shift-left and shift-right-arith.
+  // TODO: The operation legality checks could be loosened to include "custom",
+  //       but that may cause regressions for targets that do not have shift
+  //       instructions.
   if (CC == ISD::SETEQ && N0->getOpcode() == ISD::AND &&
-      N0->getValueType(0) == VT && isNullConstant(N1) && isNullConstant(N2)) {
+      N0->getValueType(0) == VT && isNullConstant(N1) && isNullConstant(N2) &&
+      TLI.isOperationLegal(ISD::SHL, VT) &&
+      TLI.isOperationLegal(ISD::SRA, VT)) {
     SDValue AndLHS = N0->getOperand(0);
     auto *ConstAndRHS = dyn_cast<ConstantSDNode>(N0->getOperand(1));
     if (ConstAndRHS && ConstAndRHS->getAPIntValue().countPopulation() == 1) {

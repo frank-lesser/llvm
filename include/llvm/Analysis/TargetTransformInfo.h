@@ -580,9 +580,9 @@ public:
   bool isLegalMaskedLoad(Type *DataType) const;
 
   /// Return true if the target supports nontemporal store.
-  bool isLegalNTStore(Type *DataType, llvm::Align Alignment) const;
+  bool isLegalNTStore(Type *DataType, Align Alignment) const;
   /// Return true if the target supports nontemporal load.
-  bool isLegalNTLoad(Type *DataType, llvm::Align Alignment) const;
+  bool isLegalNTLoad(Type *DataType, Align Alignment) const;
 
   /// Return true if the target supports masked scatter.
   bool isLegalMaskedScatter(Type *DataType) const;
@@ -1129,6 +1129,16 @@ private:
   /// Returns -1 if the cost is unknown.
   int getInstructionThroughput(const Instruction *I) const;
 
+  /// Given an input value that is an element of an 'or' reduction, check if the
+  /// reduction is composed of narrower loaded values. Assuming that a
+  /// legal-sized reduction of shifted/zexted loaded values can be load combined
+  /// in the backend, create a relative cost that accounts for the removal of
+  /// the intermediate ops and replacement by a single wide load.
+  /// TODO: If load combining is allowed in the IR optimizer, this analysis
+  ///       may not be necessary.
+  Optional<int> getLoadCombineCost(unsigned Opcode,
+                                   ArrayRef<const Value *> Args) const;
+
   /// The abstract base class used to type erase specific TTI
   /// implementations.
   class Concept;
@@ -1196,8 +1206,8 @@ public:
   virtual bool shouldFavorBackedgeIndex(const Loop *L) const = 0;
   virtual bool isLegalMaskedStore(Type *DataType) = 0;
   virtual bool isLegalMaskedLoad(Type *DataType) = 0;
-  virtual bool isLegalNTStore(Type *DataType, llvm::Align Alignment) = 0;
-  virtual bool isLegalNTLoad(Type *DataType, llvm::Align Alignment) = 0;
+  virtual bool isLegalNTStore(Type *DataType, Align Alignment) = 0;
+  virtual bool isLegalNTLoad(Type *DataType, Align Alignment) = 0;
   virtual bool isLegalMaskedScatter(Type *DataType) = 0;
   virtual bool isLegalMaskedGather(Type *DataType) = 0;
   virtual bool isLegalMaskedCompressStore(Type *DataType) = 0;
@@ -1471,10 +1481,10 @@ public:
   bool isLegalMaskedLoad(Type *DataType) override {
     return Impl.isLegalMaskedLoad(DataType);
   }
-  bool isLegalNTStore(Type *DataType, llvm::Align Alignment) override {
+  bool isLegalNTStore(Type *DataType, Align Alignment) override {
     return Impl.isLegalNTStore(DataType, Alignment);
   }
-  bool isLegalNTLoad(Type *DataType, llvm::Align Alignment) override {
+  bool isLegalNTLoad(Type *DataType, Align Alignment) override {
     return Impl.isLegalNTLoad(DataType, Alignment);
   }
   bool isLegalMaskedScatter(Type *DataType) override {

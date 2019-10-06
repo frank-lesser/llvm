@@ -193,6 +193,10 @@ class LLVMHalfElementsVectorType<int num> : LLVMMatchType<num>;
 class LLVMSubdivide2VectorType<int num> : LLVMMatchType<num>;
 class LLVMSubdivide4VectorType<int num> : LLVMMatchType<num>;
 
+// Match the element count and bit width of another intrinsic parameter, but
+// change the element type to an integer.
+class LLVMVectorOfBitcastsToInt<int num> : LLVMMatchType<num>;
+
 def llvm_void_ty       : LLVMType<isVoid>;
 let isAny = 1 in {
   def llvm_any_ty        : LLVMType<Any>;
@@ -1135,6 +1139,8 @@ def int_load_relative: Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty, llvm_anyint_ty],
                                  [IntrReadMem, IntrArgMemOnly]>;
 
 def int_hwasan_check_memaccess :
+  Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty, llvm_i32_ty], [IntrInaccessibleMemOnly, ImmArg<2>]>;
+def int_hwasan_check_memaccess_shortgranules :
   Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty, llvm_i32_ty], [IntrInaccessibleMemOnly, ImmArg<2>]>;
 
 // Xray intrinsics
